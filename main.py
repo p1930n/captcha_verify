@@ -10,7 +10,10 @@ from astrbot.api.star import Context, Star, register
 
 from .commands.command_controller import VerifyCommandController
 from .commands.command_service import VerifyCommandService
-from .domain.notice_adapter import parse_new_member_notice
+from .domain.notice_adapter import (
+    parse_group_emoji_reaction_notice,
+    parse_new_member_notice,
+)
 from .persistence.repository import VerifyRepository, default_data_root
 from .platforms.bot_actions import BotActionService
 from .platforms.event_adapter import (
@@ -18,7 +21,7 @@ from .platforms.event_adapter import (
     extract_raw_notice_payload,
 )
 from .platforms.permissions import PermissionService
-from .services.new_member_push_service import NewMemberPushService
+from .workflow.verification_workflow import VerificationWorkflow
 
 
 PLUGIN_NAME = "astrbot_plugin_captcha_verify"
@@ -49,9 +52,10 @@ class CaptchaVerifyPlugin(Star):
             self._command_service,
             self._permissions,
         )
-        self._new_member_push_service = NewMemberPushService(
+        self._verification_workflow = VerificationWorkflow(
             self._repository,
             self._bot_actions,
+            self._permissions,
         )
         self._ready = False
         self._init_task: asyncio.Task | None = asyncio.create_task(self._initialize())
@@ -152,16 +156,28 @@ class CaptchaVerifyPlugin(Star):
         if not snapshot.platform:
             return MessageEventResult()
 
-        notice = parse_new_member_notice(payload, platform=snapshot.platform)
-        if notice is None:
-            return MessageEventResult()
-
         try:
-            await self._new_member_push_service.handle_new_member_notice(event, notice)
+            new_member_notice = parse_new_member_notice(payload, platform=snapshot.platform)
+            if new_member_notice is not None:
+                await self._verification_workflow.handle_new_member_joined(
+                    event,
+                    new_member_notice,
+                )
+                return MessageEventResult()
+
+            reaction_notice = parse_group_emoji_reaction_notice(
+                payload,
+                platform=snapshot.platform,
+            )
+            if reaction_notice is not None:
+                await self._verification_workflow.handle_emoji_reaction(
+                    event,
+                    reaction_notice,
+                )
         except Exception as exc:
             logger.error(
-                "[CaptchaVerify] new member notice handling failed group=%s err=%s",
-                notice.group_id,
+                "[CaptchaVerify] raw notice handling failed notice_type=%s err=%s",
+                payload.get("notice_type"),
                 exc,
                 exc_info=True,
             )

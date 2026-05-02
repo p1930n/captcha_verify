@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+VERIFICATION_STATUS_PENDING = "pending"
+VERIFICATION_STATUS_APPROVED = "approved"
+VERIFICATION_STATUS_SUPERSEDED = "superseded"
+APPROVAL_SOURCE_GROUP_PROMPT = "group_prompt"
+APPROVAL_SOURCE_PUSH_PROMPT = "push_prompt"
+
+
 @dataclass(frozen=True, slots=True)
 class PlatformEventSnapshot:
     platform: str
@@ -40,3 +47,39 @@ class NewMemberNotice:
     operator_id: str
     sub_type: str
     time_raw: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GroupEmojiReactionNotice:
+    platform: str
+    group_id: str
+    user_id: str
+    message_id: str
+    emoji_ids: tuple[str, ...]
+    time_raw: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationSession:
+    id: int
+    platform: str
+    group_id: str
+    user_id: str
+    status: str
+    prompt_message_id: str = ""
+    muted_until: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    approved_at: str = ""
+    approver_id: str = ""
+    approval_source: str = ""
+    approval_group_id: str = ""
+    approval_message_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationPushMessage:
+    session_id: int
+    push_group_id: str
+    message_id: str
+    created_at: str = ""

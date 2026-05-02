@@ -42,16 +42,23 @@ class PermissionService:
     def is_global_admin(self, event: Any) -> bool:
         try:
             user_id = str(event.get_sender_id())
-            if not hasattr(self._context, "get_config"):
-                return False
-
-            config = self._context.get_config()
-            admins = _config_value(config, "admins_id")
-            if admins is None:
-                admins = _config_value(config, "admin_ids")
-            return user_id in _normalized_id_set(admins)
+            return self.is_global_admin_id(user_id)
         except Exception:
             return False
+
+    def is_global_admin_id(self, user_id: str) -> bool:
+        normalized_user_id = str(user_id).strip()
+        if not normalized_user_id or not hasattr(self._context, "get_config"):
+            return False
+
+        try:
+            config = self._context.get_config()
+        except Exception:
+            return False
+        admins = _config_value(config, "admins_id")
+        if admins is None:
+            admins = _config_value(config, "admin_ids")
+        return normalized_user_id in _normalized_id_set(admins)
 
     async def is_group_admin_or_owner(
         self,

@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..domain.models import VerifyGroupConfig, VerifyOverviewRow
+from .repository_verification import VerificationRepositoryMixin
 
 
 DIST_DIRECTORY_NAME = "dist"
 PLUGIN_NAME = "astrbot_plugin_captcha_verify"
 DATABASE_FILENAME = "captcha_verify.db"
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
@@ -23,7 +24,7 @@ class RepositorySchemaError(RuntimeError):
     """Raised when the persisted SQLite schema cannot be used safely."""
 
 
-class VerifyRepository:
+class VerifyRepository(VerificationRepositoryMixin):
     def __init__(self, root_path: str | Path) -> None:
         self._root = Path(root_path)
         self._database_path = self._root / DATABASE_FILENAME
@@ -383,6 +384,44 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_verify_push_bindings_target
         ON verify_push_bindings (platform, push_group_id);
+
+        CREATE TABLE IF NOT EXISTS verification_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'approved', 'superseded', 'expired')),
+            prompt_message_id TEXT NOT NULL DEFAULT '',
+            muted_until TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            approved_at TEXT NOT NULL DEFAULT '',
+            approver_id TEXT NOT NULL DEFAULT '',
+            approval_source TEXT NOT NULL DEFAULT '',
+            approval_group_id TEXT NOT NULL DEFAULT '',
+            approval_message_id TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_verification_sessions_prompt
+        ON verification_sessions (platform, group_id, prompt_message_id, status);
+
+        CREATE INDEX IF NOT EXISTS idx_verification_sessions_user_status
+        ON verification_sessions (platform, group_id, user_id, status, created_at);
+
+        CREATE TABLE IF NOT EXISTS verification_push_messages (
+            session_id INTEGER NOT NULL,
+            push_group_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (session_id, push_group_id, message_id),
+            FOREIGN KEY (session_id)
+                REFERENCES verification_sessions(id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_verification_push_messages_lookup
+        ON verification_push_messages (push_group_id, message_id);
         """
     )
 
@@ -405,6 +444,28 @@ def _validate_required_schema(connection: sqlite3.Connection) -> None:
             "created_by",
             "created_at",
             "updated_at",
+        ),
+        "verification_sessions": (
+            "id",
+            "platform",
+            "group_id",
+            "user_id",
+            "status",
+            "prompt_message_id",
+            "muted_until",
+            "created_at",
+            "updated_at",
+            "approved_at",
+            "approver_id",
+            "approval_source",
+            "approval_group_id",
+            "approval_message_id",
+        ),
+        "verification_push_messages": (
+            "session_id",
+            "push_group_id",
+            "message_id",
+            "created_at",
         ),
     }
     table_names = _user_table_names(connection)
