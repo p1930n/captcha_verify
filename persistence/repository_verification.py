@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from ..domain.models import (
@@ -12,6 +13,34 @@ from ..domain.models import (
     VERIFICATION_STATUS_SUPERSEDED,
     VerificationPushMessage,
     VerificationSession,
+)
+
+_VERIFICATION_SESSION_COLUMNS = ", ".join(
+    (
+        "id",
+        "platform",
+        "group_id",
+        "user_id",
+        "status",
+        "timeout_seconds",
+        "prompt_approval_ready",
+        "prompt_message_id",
+        "expires_at",
+        "muted_until",
+        "created_at",
+        "updated_at",
+        "approved_at",
+        "approver_id",
+        "approval_source",
+        "approval_group_id",
+        "approval_message_id",
+    )
+)
+_VERIFICATION_SESSION_SELECT = (
+    f"SELECT {_VERIFICATION_SESSION_COLUMNS} FROM verification_sessions"
+)
+_PUSH_SESSION_COLUMNS = ", ".join(
+    f"session.{col}" for col in _VERIFICATION_SESSION_COLUMNS.split(", ")
 )
 
 
@@ -28,92 +57,57 @@ class VerificationRepositoryMixin:
     ) -> VerificationSession:
         return await asyncio.to_thread(
             self._create_pending_verification_session_sync,
-            platform=platform,
-            group_id=group_id,
-            user_id=user_id,
-            muted_until=muted_until,
-            verify_window_seconds=verify_window_seconds,
+            platform=platform, group_id=group_id, user_id=user_id,
+            muted_until=muted_until, verify_window_seconds=verify_window_seconds,
             expires_at=expires_at,
         )
 
     async def set_verification_prompt_message(
-        self,
-        *,
-        session_id: int,
-        prompt_message_id: str,
+        self, *, session_id: int, prompt_message_id: str,
     ) -> VerificationSession | None:
         return await asyncio.to_thread(
             self._set_verification_prompt_message_sync,
-            session_id=session_id,
-            prompt_message_id=prompt_message_id,
+            session_id=session_id, prompt_message_id=prompt_message_id,
         )
 
     async def add_verification_push_message(
-        self,
-        *,
-        session_id: int,
-        push_group_id: str,
-        message_id: str,
+        self, *, session_id: int, push_group_id: str, message_id: str,
     ) -> VerificationPushMessage:
         return await asyncio.to_thread(
             self._add_verification_push_message_sync,
-            session_id=session_id,
-            push_group_id=push_group_id,
-            message_id=message_id,
+            session_id=session_id, push_group_id=push_group_id, message_id=message_id,
         )
 
     async def mark_verification_prompt_approval_ready(
-        self,
-        *,
-        session_id: int,
-        prompt_message_id: str,
+        self, *, session_id: int, prompt_message_id: str,
     ) -> VerificationSession | None:
         return await asyncio.to_thread(
             self._mark_verification_prompt_approval_ready_sync,
-            session_id=session_id,
-            prompt_message_id=prompt_message_id,
+            session_id=session_id, prompt_message_id=prompt_message_id,
         )
 
     async def mark_verification_push_message_approval_ready(
-        self,
-        *,
-        session_id: int,
-        push_group_id: str,
-        message_id: str,
+        self, *, session_id: int, push_group_id: str, message_id: str,
     ) -> VerificationPushMessage | None:
         return await asyncio.to_thread(
             self._mark_verification_push_message_approval_ready_sync,
-            session_id=session_id,
-            push_group_id=push_group_id,
-            message_id=message_id,
+            session_id=session_id, push_group_id=push_group_id, message_id=message_id,
         )
 
     async def find_pending_session_by_group_prompt(
-        self,
-        *,
-        platform: str,
-        group_id: str,
-        message_id: str,
+        self, *, platform: str, group_id: str, message_id: str,
     ) -> VerificationSession | None:
         return await asyncio.to_thread(
             self._find_pending_session_by_group_prompt_sync,
-            platform=platform,
-            group_id=group_id,
-            message_id=message_id,
+            platform=platform, group_id=group_id, message_id=message_id,
         )
 
     async def find_pending_session_by_push_prompt(
-        self,
-        *,
-        platform: str,
-        push_group_id: str,
-        message_id: str,
+        self, *, platform: str, push_group_id: str, message_id: str,
     ) -> VerificationSession | None:
         return await asyncio.to_thread(
             self._find_pending_session_by_push_prompt_sync,
-            platform=platform,
-            push_group_id=push_group_id,
-            message_id=message_id,
+            platform=platform, push_group_id=push_group_id, message_id=message_id,
         )
 
     async def approve_verification_session(
@@ -128,34 +122,24 @@ class VerificationRepositoryMixin:
     ) -> VerificationSession | None:
         return await asyncio.to_thread(
             self._approve_verification_session_sync,
-            session_id=session_id,
-            approver_id=approver_id,
-            approval_source=approval_source,
-            approval_group_id=approval_group_id,
-            approval_message_id=approval_message_id,
-            approved_at=approved_at,
+            session_id=session_id, approver_id=approver_id,
+            approval_source=approval_source, approval_group_id=approval_group_id,
+            approval_message_id=approval_message_id, approved_at=approved_at,
         )
 
     async def list_verification_push_messages(
-        self,
-        *,
-        session_id: int,
+        self, *, session_id: int,
     ) -> list[VerificationPushMessage]:
         return await asyncio.to_thread(
-            self._list_verification_push_messages_sync,
-            session_id=session_id,
+            self._list_verification_push_messages_sync, session_id=session_id,
         )
 
     async def expire_due_verification_sessions(
-        self,
-        *,
-        expired_at: str,
-        limit: int,
+        self, *, expired_at: str, limit: int,
     ) -> list[VerificationSession]:
         return await asyncio.to_thread(
             self._expire_due_verification_sessions_sync,
-            expired_at=expired_at,
-            limit=limit,
+            expired_at=expired_at, limit=limit,
         )
 
     def _create_pending_verification_session_sync(
@@ -356,34 +340,14 @@ class VerificationRepositoryMixin:
     ) -> VerificationSession | None:
         with self._connection() as connection:
             row = connection.execute(
-                """
-                SELECT
-                    id,
-                    platform,
-                    group_id,
-                    user_id,
-                    status,
-                    timeout_seconds,
-                    prompt_approval_ready,
-                    prompt_message_id,
-                    expires_at,
-                    muted_until,
-                    created_at,
-                    updated_at,
-                    approved_at,
-                    approver_id,
-                    approval_source,
-                    approval_group_id,
-                    approval_message_id
-                FROM verification_sessions
-                WHERE platform = ?
-                    AND group_id = ?
-                    AND prompt_message_id = ?
-                    AND status = ?
-                    AND prompt_approval_ready = 1
-                ORDER BY id DESC
-                LIMIT 1
-                """,
+                f"{_VERIFICATION_SESSION_SELECT}"
+                " WHERE platform = ?"
+                " AND group_id = ?"
+                " AND prompt_message_id = ?"
+                " AND status = ?"
+                " AND prompt_approval_ready = 1"
+                " ORDER BY id DESC"
+                " LIMIT 1",
                 (platform, group_id, message_id, VERIFICATION_STATUS_PENDING),
             ).fetchone()
             return _verification_session_from_row(row)
@@ -397,36 +361,17 @@ class VerificationRepositoryMixin:
     ) -> VerificationSession | None:
         with self._connection() as connection:
             row = connection.execute(
-                """
-                SELECT
-                    session.id,
-                    session.platform,
-                    session.group_id,
-                    session.user_id,
-                    session.status,
-                    session.timeout_seconds,
-                    session.prompt_approval_ready,
-                    session.prompt_message_id,
-                    session.expires_at,
-                    session.muted_until,
-                    session.created_at,
-                    session.updated_at,
-                    session.approved_at,
-                    session.approver_id,
-                    session.approval_source,
-                    session.approval_group_id,
-                    session.approval_message_id
-                FROM verification_sessions AS session
-                JOIN verification_push_messages AS push
-                    ON push.session_id = session.id
-                WHERE session.platform = ?
-                    AND push.push_group_id = ?
-                    AND push.message_id = ?
-                    AND session.status = ?
-                    AND push.approval_ready = 1
-                ORDER BY session.id DESC
-                LIMIT 1
-                """,
+                f"SELECT {_PUSH_SESSION_COLUMNS}"
+                " FROM verification_sessions AS session"
+                " JOIN verification_push_messages AS push"
+                " ON push.session_id = session.id"
+                " WHERE session.platform = ?"
+                " AND push.push_group_id = ?"
+                " AND push.message_id = ?"
+                " AND session.status = ?"
+                " AND push.approval_ready = 1"
+                " ORDER BY session.id DESC"
+                " LIMIT 1",
                 (
                     platform,
                     push_group_id,
@@ -505,68 +450,37 @@ class VerificationRepositoryMixin:
     ) -> list[VerificationSession]:
         with self._connection() as connection:
             rows = connection.execute(
-                """
-                SELECT
-                    id,
-                    platform,
-                    group_id,
-                    user_id,
-                    status,
-                    timeout_seconds,
-                    prompt_approval_ready,
-                    prompt_message_id,
-                    expires_at,
-                    muted_until,
-                    created_at,
-                    updated_at,
-                    approved_at,
-                    approver_id,
-                    approval_source,
-                    approval_group_id,
-                    approval_message_id
-                FROM verification_sessions
-                WHERE status = ?
-                    AND expires_at <> ''
-                    AND expires_at <= ?
-                ORDER BY expires_at, id
-                LIMIT ?
-                """,
+                f"{_VERIFICATION_SESSION_SELECT}"
+                " WHERE status = ?"
+                " AND expires_at <> ''"
+                " AND expires_at <= ?"
+                " ORDER BY expires_at, id"
+                " LIMIT ?",
                 (VERIFICATION_STATUS_PENDING, expired_at, max(1, int(limit))),
             ).fetchall()
 
             expired_sessions: list[VerificationSession] = []
             with connection:
                 for row in rows:
-                    values = tuple(row)
+                    session = _verification_session_from_row(row)
+                    if session is None:
+                        continue
                     cursor = connection.execute(
-                        """
-                        UPDATE verification_sessions
-                        SET status = ?,
-                            updated_at = ?
-                        WHERE id = ? AND status = ?
-                        """,
+                        "UPDATE verification_sessions"
+                        " SET status = ?, updated_at = ?"
+                        " WHERE id = ? AND status = ?",
                         (
                             VERIFICATION_STATUS_EXPIRED,
                             expired_at,
-                            int(values[0]),
+                            session.id,
                             VERIFICATION_STATUS_PENDING,
                         ),
                     )
                     if cursor.rowcount != 1:
                         continue
-                    updated_values = (
-                        values[0],
-                        values[1],
-                        values[2],
-                        values[3],
-                        VERIFICATION_STATUS_EXPIRED,
-                        *values[5:11],
-                        expired_at,
-                        *values[12:],
+                    expired_sessions.append(
+                        replace(session, status=VERIFICATION_STATUS_EXPIRED, updated_at=expired_at)
                     )
-                    expired_session = _verification_session_from_row(updated_values)
-                    if expired_session is not None:
-                        expired_sessions.append(expired_session)
             return expired_sessions
 
     def _get_verification_session_with_connection(
@@ -576,28 +490,7 @@ class VerificationRepositoryMixin:
         session_id: int,
     ) -> VerificationSession | None:
         row = connection.execute(
-            """
-            SELECT
-                id,
-                platform,
-                group_id,
-                user_id,
-                status,
-                timeout_seconds,
-                prompt_approval_ready,
-                prompt_message_id,
-                expires_at,
-                muted_until,
-                created_at,
-                updated_at,
-                approved_at,
-                approver_id,
-                approval_source,
-                approval_group_id,
-                approval_message_id
-            FROM verification_sessions
-            WHERE id = ?
-            """,
+            f"{_VERIFICATION_SESSION_SELECT} WHERE id = ?",
             (session_id,),
         ).fetchone()
         return _verification_session_from_row(row)
