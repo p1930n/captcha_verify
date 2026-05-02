@@ -21,6 +21,7 @@ from .platforms.event_adapter import (
     extract_raw_notice_payload,
 )
 from .platforms.permissions import PermissionService
+from .workflow.verification_timeout import VerificationTimeoutService
 from .workflow.verification_workflow import VerificationWorkflow
 
 
@@ -57,12 +58,17 @@ class CaptchaVerifyPlugin(Star):
             self._bot_actions,
             self._permissions,
         )
+        self._timeout_service = VerificationTimeoutService(
+            self._repository,
+            self._bot_actions,
+        )
         self._ready = False
         self._init_task: asyncio.Task | None = asyncio.create_task(self._initialize())
 
     async def _initialize(self) -> None:
         try:
             await self._repository.initialize()
+            self._timeout_service.start()
             self._ready = True
             logger.info("[CaptchaVerify] ready data_root=%s", self._data_root)
         except asyncio.CancelledError:
@@ -71,6 +77,7 @@ class CaptchaVerifyPlugin(Star):
             logger.error("[CaptchaVerify] init failed: %s", exc, exc_info=True)
 
     async def terminate(self) -> None:
+        await self._timeout_service.stop()
         if self._init_task and not self._init_task.done():
             self._init_task.cancel()
             result = await asyncio.gather(self._init_task, return_exceptions=True)
@@ -134,6 +141,24 @@ class CaptchaVerifyPlugin(Star):
                 event,
                 self._command_controller.overview,
                 output_format,
+            )
+        )
+
+    @verify.command("set")
+    async def verify_set(
+        self,
+        event: AstrMessageEvent,
+        key: str = "",
+        first: str = "",
+        second: str = "",
+    ):
+        yield event.plain_result(
+            await self._handle_command(
+                event,
+                self._command_controller.set,
+                key,
+                first,
+                second,
             )
         )
 

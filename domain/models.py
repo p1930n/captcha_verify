@@ -3,9 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+DEFAULT_VERIFY_TIMEOUT_SECONDS = 6 * 60 * 60
+MIN_VERIFY_TIMEOUT_SECONDS = 1
+MAX_VERIFY_TIMEOUT_SECONDS = 30 * 24 * 60 * 60
 VERIFICATION_STATUS_PENDING = "pending"
 VERIFICATION_STATUS_APPROVED = "approved"
 VERIFICATION_STATUS_SUPERSEDED = "superseded"
+VERIFICATION_STATUS_EXPIRED = "expired"
 APPROVAL_SOURCE_GROUP_PROMPT = "group_prompt"
 APPROVAL_SOURCE_PUSH_PROMPT = "push_prompt"
 
@@ -28,6 +32,7 @@ class VerifyGroupConfig:
     platform: str
     group_id: str
     enabled: bool
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
     push_group_ids: tuple[str, ...] = ()
 
 
@@ -36,6 +41,7 @@ class VerifyOverviewRow:
     platform: str
     group_id: str
     enabled: bool
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
     push_group_ids: tuple[str, ...] = ()
 
 
@@ -54,6 +60,7 @@ class GroupEmojiReactionNotice:
     platform: str
     group_id: str
     user_id: str
+    self_id: str
     message_id: str
     emoji_ids: tuple[str, ...]
     time_raw: str = ""
@@ -66,7 +73,10 @@ class VerificationSession:
     group_id: str
     user_id: str
     status: str
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
+    prompt_approval_ready: bool = False
     prompt_message_id: str = ""
+    expires_at: str = ""
     muted_until: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -82,4 +92,5 @@ class VerificationPushMessage:
     session_id: int
     push_group_id: str
     message_id: str
+    approval_ready: bool = False
     created_at: str = ""

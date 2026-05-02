@@ -63,6 +63,7 @@ def parse_group_emoji_reaction_notice(
         platform=platform,
         group_id=group_id,
         user_id=user_id,
+        self_id=_to_text(payload.get("self_id")),
         message_id=message_id,
         emoji_ids=emoji_ids,
         time_raw=_to_text(payload.get("time")),

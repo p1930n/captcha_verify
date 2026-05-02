@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ..domain.models import PlatformEventSnapshot
-from ..domain.validation import is_valid_group_id
+from ..domain.validation import is_valid_group_id, parse_timeout_seconds
 from .command_service import VerifyCommandService
 
 
@@ -20,6 +20,10 @@ BIND_USAGE = (
     "用法：.verify bind <group_id> <push_group_id>"
 )
 OVERVIEW_USAGE = "用法：.verify overview [csv]"
+SET_USAGE = (
+    "用法：.verify set timeout [seconds]\n"
+    "用法：.verify set timeout <group_id> <seconds>"
+)
 
 
 class PermissionProvider(Protocol):
@@ -135,6 +139,30 @@ class VerifyCommandController:
             output_format=output_format,
         )
 
+    async def set(
+        self,
+        event: Any,
+        snapshot: PlatformEventSnapshot,
+        key: str = "",
+        first: str = "",
+        second: str = "",
+    ) -> str:
+        if key.strip().casefold() != "timeout":
+            return SET_USAGE
+        resolved = _resolve_timeout_args(snapshot, first, second)
+        if resolved is None:
+            return SET_USAGE
+        group_id, timeout_seconds = resolved
+        denial = await self._manage_denial(event, snapshot, group_id)
+        if denial:
+            return denial
+        return await self._command_service.set_timeout_seconds(
+            platform=snapshot.platform,
+            group_id=group_id,
+            timeout_seconds=timeout_seconds,
+            updated_by=snapshot.sender_id,
+        )
+
     async def help(
         self,
         event: Any,
@@ -200,4 +228,24 @@ def _resolve_bind_args(
         return snapshot.group_id, first
     if first and second and is_valid_group_id(first) and is_valid_group_id(second):
         return first, second
+    return None
+
+
+def _resolve_timeout_args(
+    snapshot: PlatformEventSnapshot,
+    first: str,
+    second: str,
+) -> tuple[str, int] | None:
+    first = first.strip()
+    second = second.strip()
+    if first and not second:
+        timeout_seconds = parse_timeout_seconds(first)
+        if timeout_seconds is None or not snapshot.group_id:
+            return None
+        return snapshot.group_id, timeout_seconds
+    if first and second and is_valid_group_id(first):
+        timeout_seconds = parse_timeout_seconds(second)
+        if timeout_seconds is None:
+            return None
+        return first, timeout_seconds
     return None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -29,6 +30,7 @@ from captcha_verify.platforms.bot_actions import SendGroupTextResult  # noqa: E4
 from captcha_verify.workflow.messages import format_push_verification_log  # noqa: E402
 from captcha_verify.workflow.verification_workflow import (  # noqa: E402
     OK_EMOJI_ID,
+    OK_EMOJI_SYMBOL,
     VERIFICATION_MUTE_SECONDS,
     VerificationWorkflow,
 )
@@ -98,6 +100,26 @@ class VerifyRepositoryTests(unittest.IsolatedAsyncioTestCase):
             root,
             Path(temp_dir) / "data" / "dist" / "astrbot_plugin_captcha_verify",
         )
+
+    async def test_migrates_v2_verification_ready_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _create_v2_database(temp_dir)
+            repository = VerifyRepository(temp_dir)
+            await repository.initialize()
+
+            source_session = await repository.find_pending_session_by_group_prompt(
+                platform="aiocqhttp",
+                group_id="10001",
+                message_id="1001",
+            )
+            push_session = await repository.find_pending_session_by_push_prompt(
+                platform="aiocqhttp",
+                push_group_id="20001",
+                message_id="1002",
+            )
+
+            self.assertIsNotNone(source_session)
+            self.assertIsNotNone(push_session)
 
 
 class VerifyCommandControllerTests(unittest.IsolatedAsyncioTestCase):
@@ -222,7 +244,15 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 [("10001", "30001", VERIFICATION_MUTE_SECONDS)],
             )
             self.assertEqual(bot_actions.sent_groups[:2], ["10001", "20001"])
-            self.assertEqual(bot_actions.reactions, [("1001", OK_EMOJI_ID), ("1002", OK_EMOJI_ID)])
+            self.assertEqual(
+                bot_actions.reactions,
+                [("1001", OK_EMOJI_ID), ("1002", OK_EMOJI_ID)],
+            )
+            self.assertEqual(
+                bot_actions.sent_messages[0],
+                "本人或群管在6小时内点击下方OK手势即可完成认证\n"
+                "如遇QQ兼容问题，私信机器人一条信息即可触发验证码验证流程",
+            )
 
     async def test_source_group_new_member_reaction_approves(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -244,7 +274,29 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result.handled)
             self.assertIn(("10001", "30001", 0), bot_actions.mutes)
-            self.assertIn("验证方式=新人本人 OK 回应", bot_actions.sent_messages[-1])
+            self.assertIn("验证方式=新人本人 👌 回应", bot_actions.sent_messages[-1])
+
+    async def test_unicode_ok_hand_reaction_approves(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="10001",
+                user_id="30001",
+                message_id="1001",
+                emoji_id=OK_EMOJI_SYMBOL,
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertTrue(result.handled)
+            self.assertIn(("10001", "30001", 0), bot_actions.mutes)
 
     async def test_source_group_non_admin_reaction_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -335,6 +387,81 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.reason, "emoji_mismatch")
             self.assertNotIn(("10001", "30001", 0), bot_actions.mutes)
 
+    async def test_bot_self_reaction_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                bot_actions,
+                FakePermissions(global_admin=True),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="10001",
+                user_id="10000",
+                message_id="1001",
+                self_id="10000",
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertFalse(result.handled)
+            self.assertEqual(result.reason, "self_reaction_ignored")
+            self.assertNotIn(("10001", "30001", 0), bot_actions.mutes)
+
+    async def test_reaction_is_ignored_until_bot_pre_reaction_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            bot_actions = FakeBotActions(reaction_ok=False)
+            workflow = VerificationWorkflow(
+                repository,
+                bot_actions,
+                FakePermissions(group_admin_ids={"40001"}),
+            )
+            with self.assertLogs(
+                "captcha_verify.workflow.verification_workflow",
+                level="ERROR",
+            ):
+                await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="10001",
+                user_id="40001",
+                message_id="1001",
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertFalse(result.handled)
+            self.assertEqual(result.reason, "session_not_found")
+            self.assertNotIn(("10001", "30001", 0), bot_actions.mutes)
+
+    async def test_push_reaction_requires_that_push_log_pre_reaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            bot_actions = FakeBotActions(failed_reaction_message_ids={"1002"})
+            workflow = VerificationWorkflow(
+                repository,
+                bot_actions,
+                FakePermissions(group_admin_ids={"40001"}),
+            )
+            with self.assertLogs(
+                "captcha_verify.workflow.verification_workflow",
+                level="ERROR",
+            ):
+                await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="20001",
+                user_id="50001",
+                message_id="1002",
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertFalse(result.handled)
+            self.assertEqual(result.reason, "session_not_found")
+            self.assertNotIn(("10001", "30001", 0), bot_actions.mutes)
+
     async def test_zero_count_ok_reaction_is_ignored(self) -> None:
         reaction = parse_group_emoji_reaction_notice(
             {
@@ -342,6 +469,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 "notice_type": "group_msg_emoji_like",
                 "group_id": "10001",
                 "user_id": "30001",
+                "self_id": "10000",
                 "message_id": "1001",
                 "likes": [{"emoji_id": OK_EMOJI_ID, "count": 0}],
             },
@@ -380,12 +508,19 @@ class FakePermissions:
 
 
 class FakeBotActions:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        reaction_ok: bool = True,
+        failed_reaction_message_ids: set[str] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, str]] = []
         self.sent_groups: list[str] = []
         self.sent_messages: list[str] = []
         self.mutes: list[tuple[str, str, int]] = []
         self.reactions: list[tuple[str, str]] = []
+        self.reaction_ok = reaction_ok
+        self.failed_reaction_message_ids = failed_reaction_message_ids or set()
         self._next_message_id = 1000
 
     async def send_group_text(
@@ -427,7 +562,98 @@ class FakeBotActions:
     ) -> BotActionResult:
         _ = event
         self.reactions.append((message_id, emoji_id))
-        return BotActionResult(ok=True)
+        reaction_ok = (
+            self.reaction_ok and message_id not in self.failed_reaction_message_ids
+        )
+        return BotActionResult(
+            ok=reaction_ok,
+            reason="" if reaction_ok else "reaction failed",
+        )
+
+
+def _create_v2_database(temp_dir: str) -> None:
+    database_path = Path(temp_dir) / DATABASE_FILENAME
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE verification_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (
+                        status IN (
+                            'pending',
+                            'approved',
+                            'superseded',
+                            'expired'
+                        )
+                    ),
+                prompt_message_id TEXT NOT NULL DEFAULT '',
+                muted_until TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                approved_at TEXT NOT NULL DEFAULT '',
+                approver_id TEXT NOT NULL DEFAULT '',
+                approval_source TEXT NOT NULL DEFAULT '',
+                approval_group_id TEXT NOT NULL DEFAULT '',
+                approval_message_id TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE verification_push_messages (
+                session_id INTEGER NOT NULL,
+                push_group_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, push_group_id, message_id),
+                FOREIGN KEY (session_id)
+                    REFERENCES verification_sessions(id)
+                    ON DELETE CASCADE
+            );
+
+            INSERT INTO verification_sessions (
+                id,
+                platform,
+                group_id,
+                user_id,
+                status,
+                prompt_message_id,
+                muted_until,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                1,
+                'aiocqhttp',
+                '10001',
+                '30001',
+                'pending',
+                '1001',
+                '2024-03-10 00-00',
+                '2024-03-10T00:00:00+00:00',
+                '2024-03-10T00:00:00+00:00'
+            );
+
+            INSERT INTO verification_push_messages (
+                session_id,
+                push_group_id,
+                message_id,
+                created_at
+            )
+            VALUES (
+                1,
+                '20001',
+                '1002',
+                '2024-03-10T00:00:00+00:00'
+            );
+
+            PRAGMA user_version = 2;
+            """
+        )
+    finally:
+        connection.close()
 
 
 async def _enabled_repository(temp_dir: str) -> VerifyRepository:
@@ -471,6 +697,7 @@ def _emoji_reaction(
     user_id: str,
     message_id: str,
     emoji_id: str = OK_EMOJI_ID,
+    self_id: str = "10000",
 ):
     reaction = parse_group_emoji_reaction_notice(
         {
@@ -478,6 +705,7 @@ def _emoji_reaction(
             "notice_type": "group_msg_emoji_like",
             "group_id": group_id,
             "user_id": user_id,
+            "self_id": self_id,
             "message_id": message_id,
             "likes": [{"emoji_id": emoji_id, "count": 1}],
             "time": 1710000060,

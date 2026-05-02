@@ -70,9 +70,7 @@ class BotActionService:
                 reason=FAILED_REASON_INVALID_GROUP_ID,
             )
 
-        bot = self._permissions.get_bot_from_event(event)
-        if not bot:
-            bot = await self._permissions.get_bot_instance()
+        bot = await self._resolve_action_bot(event, platform="aiocqhttp")
         if not bot or not hasattr(bot, "api"):
             return SendGroupTextResult(
                 ok=False,
@@ -132,9 +130,34 @@ class BotActionService:
         return await self._call_action(
             event,
             "set_group_ban",
+            platform="aiocqhttp",
             group_id=int(normalized_group_id),
             user_id=int(normalized_user_id),
             duration=max(0, int(duration_seconds)),
+        )
+
+    async def kick_group_member(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        reject_add_request: bool = False,
+    ) -> BotActionResult:
+        normalized_group_id = group_id.strip()
+        normalized_user_id = user_id.strip()
+        if not is_valid_group_id(normalized_group_id):
+            return BotActionResult(ok=False, reason=FAILED_REASON_INVALID_GROUP_ID)
+        if not _is_positive_int_text(normalized_user_id):
+            return BotActionResult(ok=False, reason=FAILED_REASON_INVALID_USER_ID)
+
+        return await self._call_action(
+            None,
+            "set_group_kick",
+            platform=platform,
+            group_id=int(normalized_group_id),
+            user_id=int(normalized_user_id),
+            reject_add_request=reject_add_request,
         )
 
     async def add_message_reaction(
@@ -154,14 +177,20 @@ class BotActionService:
         return await self._call_action(
             event,
             "set_msg_emoji_like",
+            platform="aiocqhttp",
             message_id=int(normalized_message_id),
             emoji_id=normalized_emoji_id,
         )
 
-    async def _call_action(self, event: Any, action: str, **params: Any) -> BotActionResult:
-        bot = self._permissions.get_bot_from_event(event)
-        if not bot:
-            bot = await self._permissions.get_bot_instance()
+    async def _call_action(
+        self,
+        event: Any | None,
+        action: str,
+        *,
+        platform: str,
+        **params: Any,
+    ) -> BotActionResult:
+        bot = await self._resolve_action_bot(event, platform=platform)
         if not bot or not hasattr(bot, "api"):
             return BotActionResult(ok=False, reason=FAILED_REASON_NO_ACTION_CLIENT)
 
@@ -181,6 +210,14 @@ class BotActionService:
             )
             return BotActionResult(ok=False, reason=FAILED_REASON_ACTION_FAILED)
         return BotActionResult(ok=True)
+
+    async def _resolve_action_bot(self, event: Any | None, *, platform: str) -> Any:
+        bot = None
+        if event is not None:
+            bot = self._permissions.get_bot_from_event(event)
+        if not bot:
+            bot = await self._permissions.get_bot_instance(platform)
+        return bot
 
 
 def _extract_message_id(response: Any) -> str:

@@ -9,14 +9,19 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..domain.models import VerifyGroupConfig, VerifyOverviewRow
+from ..domain.models import (
+    DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    VERIFICATION_STATUS_PENDING,
+    VerifyGroupConfig,
+    VerifyOverviewRow,
+)
 from .repository_verification import VerificationRepositoryMixin
 
 
 DIST_DIRECTORY_NAME = "dist"
 PLUGIN_NAME = "astrbot_plugin_captcha_verify"
 DATABASE_FILENAME = "captcha_verify.db"
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 4
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
@@ -64,6 +69,22 @@ class VerifyRepository(VerificationRepositoryMixin):
             group_id=group_id,
             push_group_id=push_group_id,
             created_by=created_by,
+        )
+
+    async def set_group_timeout_seconds(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        timeout_seconds: int,
+        updated_by: str,
+    ) -> VerifyGroupConfig:
+        return await asyncio.to_thread(
+            self._set_group_timeout_seconds_sync,
+            platform=platform,
+            group_id=group_id,
+            timeout_seconds=timeout_seconds,
+            updated_by=updated_by,
         )
 
     async def get_group_config(
@@ -121,11 +142,12 @@ class VerifyRepository(VerificationRepositoryMixin):
                         platform,
                         group_id,
                         enabled,
+                        timeout_seconds,
                         updated_by,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (platform, group_id)
                     DO UPDATE SET
                         enabled = excluded.enabled,
@@ -136,6 +158,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                         platform,
                         group_id,
                         int(enabled),
+                        DEFAULT_VERIFY_TIMEOUT_SECONDS,
                         updated_by,
                         now,
                         now,
@@ -164,16 +187,24 @@ class VerifyRepository(VerificationRepositoryMixin):
                         platform,
                         group_id,
                         enabled,
+                        timeout_seconds,
                         updated_by,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, 0, ?, ?, ?)
+                    VALUES (?, ?, 0, ?, ?, ?, ?)
                     ON CONFLICT (platform, group_id)
                     DO UPDATE SET
                         updated_at = verify_group_settings.updated_at
                     """,
-                    (platform, group_id, created_by, now, now),
+                    (
+                        platform,
+                        group_id,
+                        DEFAULT_VERIFY_TIMEOUT_SECONDS,
+                        created_by,
+                        now,
+                        now,
+                    ),
                 )
                 connection.execute(
                     """
@@ -208,6 +239,50 @@ class VerifyRepository(VerificationRepositoryMixin):
                 group_id=group_id,
             )
 
+    def _set_group_timeout_seconds_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        timeout_seconds: int,
+        updated_by: str,
+    ) -> VerifyGroupConfig:
+        now = utc_now()
+        with self._connection() as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO verify_group_settings (
+                        platform,
+                        group_id,
+                        enabled,
+                        timeout_seconds,
+                        updated_by,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, 0, ?, ?, ?, ?)
+                    ON CONFLICT (platform, group_id)
+                    DO UPDATE SET
+                        timeout_seconds = excluded.timeout_seconds,
+                        updated_by = excluded.updated_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        platform,
+                        group_id,
+                        timeout_seconds,
+                        updated_by,
+                        now,
+                        now,
+                    ),
+                )
+            return self._get_group_config_with_connection(
+                connection,
+                platform=platform,
+                group_id=group_id,
+            )
+
     def _get_group_config_sync(
         self,
         *,
@@ -229,7 +304,7 @@ class VerifyRepository(VerificationRepositoryMixin):
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT platform, group_id, enabled
+                SELECT platform, group_id, enabled, timeout_seconds
                 FROM verify_group_settings
                 WHERE platform = ? AND enabled = 1
                 ORDER BY group_id
@@ -241,6 +316,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                     platform=str(row[0]),
                     group_id=str(row[1]),
                     enabled=bool(row[2]),
+                    timeout_seconds=int(row[3] or DEFAULT_VERIFY_TIMEOUT_SECONDS),
                     push_group_ids=self._list_enabled_push_group_ids_with_connection(
                         connection,
                         platform=str(row[0]),
@@ -272,17 +348,23 @@ class VerifyRepository(VerificationRepositoryMixin):
     ) -> VerifyGroupConfig:
         row = connection.execute(
             """
-            SELECT enabled
+            SELECT enabled, timeout_seconds
             FROM verify_group_settings
             WHERE platform = ? AND group_id = ?
             """,
             (platform, group_id),
         ).fetchone()
         enabled = bool(row[0]) if row else False
+        timeout_seconds = (
+            int(row[1] or DEFAULT_VERIFY_TIMEOUT_SECONDS)
+            if row
+            else DEFAULT_VERIFY_TIMEOUT_SECONDS
+        )
         return VerifyGroupConfig(
             platform=platform,
             group_id=group_id,
             enabled=enabled,
+            timeout_seconds=timeout_seconds,
             push_group_ids=self._list_enabled_push_group_ids_with_connection(
                 connection,
                 platform=platform,
@@ -346,22 +428,33 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             f"{current_version} > {CURRENT_SCHEMA_VERSION}"
         )
 
-    _create_schema_objects(connection)
-    _validate_required_schema(connection)
-    connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+    with connection:
+        _create_schema_objects(connection)
+        _migrate_schema(connection, current_version)
+        _create_post_migration_indexes(connection)
+        _validate_required_schema(connection)
+        connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _utc_after_seconds(seconds: int) -> str:
+    return datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + seconds,
+        tz=timezone.utc,
+    ).isoformat()
+
+
 def _create_schema_objects(connection: sqlite3.Connection) -> None:
     connection.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS verify_group_settings (
             platform TEXT NOT NULL,
             group_id TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 0,
+            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS},
             updated_by TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -392,7 +485,10 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
             user_id TEXT NOT NULL,
             status TEXT NOT NULL
                 CHECK (status IN ('pending', 'approved', 'superseded', 'expired')),
+            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS},
+            prompt_approval_ready INTEGER NOT NULL DEFAULT 0,
             prompt_message_id TEXT NOT NULL DEFAULT '',
+            expires_at TEXT NOT NULL DEFAULT '',
             muted_until TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -413,6 +509,7 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
             session_id INTEGER NOT NULL,
             push_group_id TEXT NOT NULL,
             message_id TEXT NOT NULL,
+            approval_ready INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             PRIMARY KEY (session_id, push_group_id, message_id),
             FOREIGN KEY (session_id)
@@ -426,12 +523,110 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
     )
 
 
+def _create_post_migration_indexes(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_verification_sessions_due
+        ON verification_sessions (status, expires_at)
+        """
+    )
+
+
+def _migrate_schema(connection: sqlite3.Connection, current_version: int) -> None:
+    if current_version < 3:
+        _add_column_if_missing(
+            connection,
+            table_name="verification_sessions",
+            column_name="prompt_approval_ready",
+            column_definition="prompt_approval_ready INTEGER NOT NULL DEFAULT 0",
+        )
+        _add_column_if_missing(
+            connection,
+            table_name="verification_push_messages",
+            column_name="approval_ready",
+            column_definition="approval_ready INTEGER NOT NULL DEFAULT 0",
+        )
+        connection.execute(
+            """
+            UPDATE verification_sessions
+            SET prompt_approval_ready = 1
+            WHERE status = ?
+                AND prompt_message_id <> ''
+            """,
+            (VERIFICATION_STATUS_PENDING,),
+        )
+    if current_version < 4:
+        _add_column_if_missing(
+            connection,
+            table_name="verify_group_settings",
+            column_name="timeout_seconds",
+            column_definition=(
+                "timeout_seconds INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS}"
+            ),
+        )
+        _add_column_if_missing(
+            connection,
+            table_name="verification_sessions",
+            column_name="timeout_seconds",
+            column_definition=(
+                "timeout_seconds INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS}"
+            ),
+        )
+        _add_column_if_missing(
+            connection,
+            table_name="verification_sessions",
+            column_name="expires_at",
+            column_definition="expires_at TEXT NOT NULL DEFAULT ''",
+        )
+        expires_at = _utc_after_seconds(DEFAULT_VERIFY_TIMEOUT_SECONDS)
+        connection.execute(
+            """
+            UPDATE verification_sessions
+            SET expires_at = ?
+            WHERE status = ?
+                AND expires_at = ''
+            """,
+            (expires_at, VERIFICATION_STATUS_PENDING),
+        )
+        connection.execute(
+            """
+            UPDATE verification_push_messages
+            SET approval_ready = 1
+            WHERE EXISTS (
+                SELECT 1
+                FROM verification_sessions AS session
+                WHERE session.id = verification_push_messages.session_id
+                    AND session.status = ?
+            )
+            """,
+            (VERIFICATION_STATUS_PENDING,),
+        )
+
+
+def _add_column_if_missing(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> None:
+    if column_name in _table_columns(connection, table_name):
+        return
+    escaped_table_name = table_name.replace('"', '""')
+    connection.execute(
+        f'ALTER TABLE "{escaped_table_name}" ADD COLUMN {column_definition}'
+    )
+
+
 def _validate_required_schema(connection: sqlite3.Connection) -> None:
     required = {
         "verify_group_settings": (
             "platform",
             "group_id",
             "enabled",
+            "timeout_seconds",
             "updated_by",
             "created_at",
             "updated_at",
@@ -451,7 +646,10 @@ def _validate_required_schema(connection: sqlite3.Connection) -> None:
             "group_id",
             "user_id",
             "status",
+            "timeout_seconds",
+            "prompt_approval_ready",
             "prompt_message_id",
+            "expires_at",
             "muted_until",
             "created_at",
             "updated_at",
@@ -465,6 +663,7 @@ def _validate_required_schema(connection: sqlite3.Connection) -> None:
             "session_id",
             "push_group_id",
             "message_id",
+            "approval_ready",
             "created_at",
         ),
     }

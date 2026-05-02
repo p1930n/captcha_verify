@@ -27,7 +27,8 @@ from .messages import (
 )
 
 
-OK_EMOJI_ID = "74"
+OK_EMOJI_ID = "128076"
+OK_EMOJI_SYMBOL = "👌"
 VERIFICATION_MUTE_SECONDS = 30 * 24 * 60 * 60
 
 
@@ -94,6 +95,7 @@ class VerificationWorkflow:
         self._bot_actions = bot_actions
         self._permissions = permissions
         self._ok_emoji_id = ok_emoji_id
+        self._ok_emoji_ids = _accepted_ok_emoji_ids(ok_emoji_id)
         self._mute_seconds = mute_seconds
 
     async def handle_new_member_joined(
@@ -113,6 +115,8 @@ class VerificationWorkflow:
             group_id=notice.group_id,
             user_id=notice.user_id,
             muted_until=utc_after_seconds_text(self._mute_seconds),
+            timeout_seconds=config.timeout_seconds,
+            expires_at=utc_after_seconds_text(config.timeout_seconds),
         )
 
         await self._mute_new_member(event, notice, session)
@@ -135,7 +139,9 @@ class VerificationWorkflow:
         event: Any,
         reaction: GroupEmojiReactionNotice,
     ) -> WorkflowResult:
-        if self._ok_emoji_id not in reaction.emoji_ids:
+        if reaction.self_id and reaction.user_id == reaction.self_id:
+            return WorkflowResult(handled=False, reason="self_reaction_ignored")
+        if not self._ok_emoji_ids.intersection(reaction.emoji_ids):
             return WorkflowResult(handled=False, reason="emoji_mismatch")
 
         source_session = await self._repository.find_pending_session_by_group_prompt(
@@ -197,14 +203,20 @@ class VerificationWorkflow:
         result = await self._bot_actions.send_group_text(
             event,
             target_group_id=notice.group_id,
-            message=format_source_verification_prompt(notice),
+            message=format_source_verification_prompt(
+                verification_window_seconds=session.timeout_seconds,
+            ),
         )
         if result.ok and result.message_id:
             await self._repository.set_verification_prompt_message(
                 session_id=session.id,
                 prompt_message_id=result.message_id,
             )
-            await self._react_ok(event, result.message_id)
+            if await self._react_ok(event, result.message_id):
+                await self._repository.mark_verification_prompt_approval_ready(
+                    session_id=session.id,
+                    prompt_message_id=result.message_id,
+                )
         else:
             logger.error(
                 "[CaptchaVerify] source prompt send failed group=%s user=%s reason=%s",
@@ -236,7 +248,12 @@ class VerificationWorkflow:
                 push_group_id=push_group_id,
                 message_id=result.message_id,
             )
-            await self._react_ok(event, result.message_id)
+            if await self._react_ok(event, result.message_id):
+                await self._repository.mark_verification_push_message_approval_ready(
+                    session_id=session.id,
+                    push_group_id=push_group_id,
+                    message_id=result.message_id,
+                )
             return
 
         logger.error(
@@ -331,7 +348,7 @@ class VerificationWorkflow:
                     result.reason,
                 )
 
-    async def _react_ok(self, event: Any, message_id: str) -> None:
+    async def _react_ok(self, event: Any, message_id: str) -> bool:
         result = await self._bot_actions.add_message_reaction(
             event,
             message_id=message_id,
@@ -339,7 +356,15 @@ class VerificationWorkflow:
         )
         if not result.ok:
             logger.error(
-                "[CaptchaVerify] OK reaction failed message=%s reason=%s",
+                "[CaptchaVerify] ok hand reaction failed message=%s reason=%s",
                 message_id,
                 result.reason,
             )
+            return False
+        return True
+
+
+def _accepted_ok_emoji_ids(ok_emoji_id: str) -> frozenset[str]:
+    if ok_emoji_id == OK_EMOJI_ID:
+        return frozenset((OK_EMOJI_ID, OK_EMOJI_SYMBOL))
+    return frozenset((ok_emoji_id,))

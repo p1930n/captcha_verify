@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from ..domain.duration import format_duration_text
 from ..domain.models import GroupEmojiReactionNotice, NewMemberNotice, VerificationSession
 
 
@@ -9,13 +10,13 @@ DISPLAY_TIMEZONE = timezone(timedelta(hours=8))
 NOTICE_TIME_FORMAT = "%Y-%m-%d %H-%M"
 
 
-def format_source_verification_prompt(notice: NewMemberNotice) -> str:
+def format_source_verification_prompt(*, verification_window_seconds: int) -> str:
     return "\n".join(
         [
-            "验证码入群审核：请完成验证",
-            f"新人={notice.user_id}",
-            "请在本消息下方点击机器人预回应的 OK 表情。",
-            "新人本人、群主/管理员、机器人管理员点击 OK 后会自动解除禁言。",
+            "本人或群管在"
+            f"{format_duration_text(verification_window_seconds)}"
+            "内点击下方OK手势即可完成认证",
+            "如遇QQ兼容问题，私信机器人一条信息即可触发验证码验证流程",
         ]
     )
 
@@ -38,7 +39,7 @@ def format_push_verification_log(
         lines.append(f"时间={format_notice_time(notice.time_raw)}")
     if source_prompt_message_id:
         lines.append(f"源群验证消息={source_prompt_message_id}")
-    lines.append("点击本消息下方机器人预回应的 OK 表情可通过审核。")
+    lines.append("点击本消息下方机器人预回应的 👌 表情可通过审核。")
     return "\n".join(lines)
 
 
@@ -52,7 +53,7 @@ def format_approval_log(
         f"新人={session.user_id}",
     ]
     if reaction.user_id == session.user_id:
-        lines.append("验证方式=新人本人 OK 回应")
+        lines.append("验证方式=新人本人 👌 回应")
     else:
         lines.append(f"审批人={reaction.user_id}")
     if session.approval_source:
