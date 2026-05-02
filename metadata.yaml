@@ -1,0 +1,10 @@
+name: astrbot_plugin_captcha_verify
+display_name: Captcha Verify
+desc: New member captcha verification plugin for QQ groups.
+author: p1930n
+version: 0.1.0
+help: .verify help
+repo: ""
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=4.16,<5"
