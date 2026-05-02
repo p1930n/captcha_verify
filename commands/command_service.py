@@ -28,8 +28,8 @@ class VerifyCommandService:
             enabled=enabled,
             updated_by=updated_by,
         )
-        state = "enabled" if config.enabled else "disabled"
-        return f"Captcha Verify group {group_id} is {state}."
+        state = "已启用" if config.enabled else "已停用"
+        return f"验证码入群审核{state}：群 {group_id}。"
 
     async def bind_push_group(
         self,
@@ -47,9 +47,9 @@ class VerifyCommandService:
         )
         return "\n".join(
             [
-                "Captcha Verify push binding saved.",
-                f"group_id={config.group_id}",
-                f"push_groups={_format_push_groups(config)}",
+                "推送群绑定已保存。",
+                f"监控群={config.group_id}",
+                f"推送群={_format_push_groups(config)}",
             ]
         )
 
@@ -60,11 +60,11 @@ class VerifyCommandService:
         )
         return "\n".join(
             [
-                "Captcha Verify status:",
-                f"platform={config.platform}",
-                f"group_id={config.group_id}",
-                f"enabled={_format_bool(config.enabled)}",
-                f"push_groups={_format_push_groups(config)}",
+                "验证码入群审核状态：",
+                f"平台={config.platform}",
+                f"群号={config.group_id}",
+                f"已启用={_format_human_bool(config.enabled)}",
+                f"推送群={_format_push_groups(config)}",
             ]
         )
 
@@ -77,13 +77,13 @@ class VerifyCommandService:
     def format_help(self) -> str:
         return "\n".join(
             [
-                "Captcha Verify commands:",
-                ".verify enable [group_id]",
-                ".verify disable [group_id]",
-                ".verify status [group_id]",
-                ".verify bind <push_group_id>",
-                ".verify bind <group_id> <push_group_id>",
-                ".verify overview [csv]",
+                "验证码入群审核命令：",
+                ".verify enable [group_id] - 启用当前群或指定群",
+                ".verify disable [group_id] - 停用当前群或指定群",
+                ".verify status [group_id] - 查看当前群或指定群状态",
+                ".verify bind <push_group_id> - 将当前群绑定到推送群",
+                ".verify bind <group_id> <push_group_id> - 将指定群绑定到推送群",
+                ".verify overview [csv] - 查看已启用群与推送群绑定",
             ]
         )
 
@@ -92,9 +92,13 @@ def _format_bool(value: bool) -> str:
     return "true" if value else "false"
 
 
+def _format_human_bool(value: bool) -> str:
+    return "是" if value else "否"
+
+
 def _format_push_groups(config: VerifyGroupConfig) -> str:
     if not config.push_group_ids:
-        return "-"
+        return "无"
     return ",".join(config.push_group_ids)
 
 
@@ -102,10 +106,10 @@ def _format_overview_summary(rows: list[VerifyOverviewRow]) -> str:
     binding_count = sum(len(row.push_group_ids) for row in rows)
     return "\n".join(
         [
-            "Captcha Verify overview:",
-            f"enabled_groups={len(rows)}",
-            f"push_bindings={binding_count}",
-            "Use .verify overview csv for details.",
+            "验证码入群审核总览：",
+            f"已启用群数={len(rows)}",
+            f"推送绑定数={binding_count}",
+            "使用 .verify overview csv 查看明细。",
         ]
     )
 

@@ -23,10 +23,10 @@ from .services.new_member_push_service import NewMemberPushService
 
 PLUGIN_NAME = "astrbot_plugin_captcha_verify"
 PLUGIN_AUTHOR = "p1930n"
-PLUGIN_DESCRIPTION = "New member captcha verification plugin for QQ groups."
+PLUGIN_DESCRIPTION = "QQ 群新人入群审核与推送通知插件。"
 PLUGIN_VERSION = "0.1.0"
 PLUGIN_REPO = ""
-PLUGIN_LOADING_MESSAGE = "Captcha Verify is still loading."
+PLUGIN_LOADING_MESSAGE = "验证码入群审核插件仍在加载中。"
 
 
 @register(
@@ -181,4 +181,4 @@ class CaptchaVerifyPlugin(Star):
             return await handler(event, snapshot, *args)
         except Exception as exc:
             logger.error("[CaptchaVerify] command failed: %s", exc, exc_info=True)
-            return "Captcha Verify command failed."
+            return "验证码入群审核命令执行失败。"

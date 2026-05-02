@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 try:
@@ -12,6 +13,10 @@ except ImportError:
 from ..domain.models import NewMemberNotice
 from ..persistence.repository import VerifyRepository
 from ..platforms.bot_actions import SendGroupTextResult
+
+
+DISPLAY_TIMEZONE = timezone(timedelta(hours=8))
+NOTICE_TIME_FORMAT = "%Y-%m-%d %H-%M"
 
 
 class BotActions(Protocol):
@@ -77,14 +82,36 @@ class NewMemberPushService:
 
 def format_new_member_push_message(notice: NewMemberNotice) -> str:
     lines = [
-        "Captcha Verify new member:",
-        f"source_group={notice.group_id}",
-        f"user_id={notice.user_id}",
+        "验证码入群审核：检测到新人入群",
+        f"来源群={notice.group_id}",
+        f"新人={notice.user_id}",
     ]
     if notice.operator_id:
-        lines.append(f"operator_id={notice.operator_id}")
+        lines.append(f"操作人={notice.operator_id}")
     if notice.sub_type:
-        lines.append(f"join_type={notice.sub_type}")
+        lines.append(f"入群方式={_format_join_type(notice.sub_type)}")
     if notice.time_raw:
-        lines.append(f"time={notice.time_raw}")
+        lines.append(f"时间={_format_notice_time(notice.time_raw)}")
     return "\n".join(lines)
+
+
+def _format_join_type(sub_type: str) -> str:
+    normalized = sub_type.strip().casefold()
+    if normalized == "approve":
+        return "管理员同意"
+    if normalized == "invite":
+        return "邀请入群"
+    return sub_type
+
+
+def _format_notice_time(time_raw: str) -> str:
+    normalized = time_raw.strip()
+    if not normalized:
+        return ""
+    try:
+        timestamp = int(float(normalized))
+    except ValueError:
+        return normalized
+    return datetime.fromtimestamp(timestamp, tz=DISPLAY_TIMEZONE).strftime(
+        NOTICE_TIME_FORMAT
+    )

@@ -8,21 +8,18 @@ from .command_service import VerifyCommandService
 
 
 COMMAND_PERMISSION_DENIED = (
-    "Captcha Verify permission denied: "
-    "requires AstrBot admin or QQ group owner/admin permission."
+    "权限不足：需要 AstrBot 管理员权限，或当前 QQ 群的群主/管理员权限。"
 )
-GLOBAL_PERMISSION_DENIED = (
-    "Captcha Verify permission denied: requires AstrBot admin permission."
-)
-GROUP_SCOPE_REQUIRED = "Captcha Verify requires a group context or explicit group id."
-ENABLE_USAGE = "Usage: .verify enable [group_id]"
-DISABLE_USAGE = "Usage: .verify disable [group_id]"
-STATUS_USAGE = "Usage: .verify status [group_id]"
+GLOBAL_PERMISSION_DENIED = "权限不足：该操作需要 AstrBot 管理员权限。"
+GROUP_SCOPE_REQUIRED = "缺少群上下文：请在群内执行，或显式传入群号。"
+ENABLE_USAGE = "用法：.verify enable [group_id]"
+DISABLE_USAGE = "用法：.verify disable [group_id]"
+STATUS_USAGE = "用法：.verify status [group_id]"
 BIND_USAGE = (
-    "Usage: .verify bind <push_group_id>\n"
-    "Usage: .verify bind <group_id> <push_group_id>"
+    "用法：.verify bind <push_group_id>\n"
+    "用法：.verify bind <group_id> <push_group_id>"
 )
-OVERVIEW_USAGE = "Usage: .verify overview [csv]"
+OVERVIEW_USAGE = "用法：.verify overview [csv]"
 
 
 class PermissionProvider(Protocol):

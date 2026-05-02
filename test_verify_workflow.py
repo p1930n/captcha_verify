@@ -24,6 +24,7 @@ from captcha_verify.persistence.repository import (  # noqa: E402
 from captcha_verify.platforms.bot_actions import SendGroupTextResult  # noqa: E402
 from captcha_verify.services.new_member_push_service import (  # noqa: E402
     NewMemberPushService,
+    format_new_member_push_message,
 )
 
 
@@ -119,7 +120,7 @@ class VerifyCommandControllerTests(unittest.IsolatedAsyncioTestCase):
                 group_id="10001",
             )
 
-            self.assertIn("push binding saved", message)
+            self.assertIn("推送群绑定已保存", message)
             self.assertEqual(config.push_group_ids, ("20001",))
 
     async def test_bind_explicit_group_requires_global_admin(self) -> None:
@@ -143,7 +144,7 @@ class VerifyCommandControllerTests(unittest.IsolatedAsyncioTestCase):
                 "20001",
             )
 
-            self.assertIn("requires AstrBot admin", message)
+            self.assertIn("需要 AstrBot 管理员权限", message)
 
     async def test_overview_csv_lists_enabled_group_bindings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -213,8 +214,25 @@ class NewMemberPushServiceTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(result.delivered_targets, ("20001",))
             self.assertEqual(bot_actions.calls[0][0], "20001")
-            self.assertIn("source_group=10001", bot_actions.calls[0][1])
-            self.assertIn("user_id=30001", bot_actions.calls[0][1])
+            self.assertIn("来源群=10001", bot_actions.calls[0][1])
+            self.assertIn("新人=30001", bot_actions.calls[0][1])
+            self.assertIn("时间=2024-03-10 00-00", bot_actions.calls[0][1])
+
+    async def test_formats_unix_notice_time_as_local_datetime(self) -> None:
+        notice = parse_new_member_notice(
+            {
+                "post_type": "notice",
+                "notice_type": "group_increase",
+                "group_id": 10001,
+                "user_id": 30001,
+                "sub_type": "invite",
+                "time": 1710000000,
+            },
+            platform="aiocqhttp",
+        )
+
+        self.assertIsNotNone(notice)
+        self.assertIn("时间=2024-03-10 00-00", format_new_member_push_message(notice))
 
 
 class FakePermissions:
