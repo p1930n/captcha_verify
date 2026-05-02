@@ -13,10 +13,10 @@ NOTICE_TIME_FORMAT = "%Y-%m-%d %H-%M"
 def format_source_verification_prompt(*, verification_window_seconds: int) -> str:
     return "\n".join(
         [
-            "本人或群管在"
+            "群管在"
             f"{format_duration_text(verification_window_seconds)}"
             "内点击下方OK手势即可完成认证",
-            "如遇QQ兼容问题，私信机器人任意一条信息即可通过",
+            "本人私信机器人任意一条信息即可通过",
             "群主或管理员点击下方问号表情将踢出并加入黑名单",
         ]
     )

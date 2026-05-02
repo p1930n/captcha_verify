@@ -64,8 +64,8 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 bot_actions.sent_messages[0],
-                "本人或群管在6小时内点击下方OK手势即可完成认证\n"
-                "如遇QQ兼容问题，私信机器人任意一条信息即可通过\n"
+                "群管在6小时内点击下方OK手势即可完成认证\n"
+                "本人私信机器人任意一条信息即可通过\n"
                 "群主或管理员点击下方问号表情将踢出并加入黑名单",
             )
 
