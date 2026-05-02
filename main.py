@@ -14,10 +14,15 @@ from .domain.notice_adapter import (
     parse_group_emoji_reaction_notice,
     parse_new_member_notice,
 )
+from .persistence.blacklist_repository import (
+    BlacklistRepository,
+    default_blacklist_root,
+)
 from .persistence.repository import VerifyRepository, default_data_root
 from .platforms.bot_actions import BotActionService
 from .platforms.event_adapter import (
     dehydrate_event_snapshot,
+    extract_private_message_notice,
     extract_raw_notice_payload,
 )
 from .platforms.permissions import PermissionService
@@ -45,7 +50,9 @@ class CaptchaVerifyPlugin(Star):
         super().__init__(context)
         _ = config
         self._data_root = Path(default_data_root())
+        self._blacklist_root = Path(default_blacklist_root())
         self._repository = VerifyRepository(self._data_root)
+        self._blacklist_repository = BlacklistRepository(self._blacklist_root)
         self._permissions = PermissionService(context)
         self._bot_actions = BotActionService(self._permissions)
         self._command_service = VerifyCommandService(self._repository)
@@ -55,6 +62,7 @@ class CaptchaVerifyPlugin(Star):
         )
         self._verification_workflow = VerificationWorkflow(
             self._repository,
+            self._blacklist_repository,
             self._bot_actions,
             self._permissions,
         )
@@ -68,9 +76,14 @@ class CaptchaVerifyPlugin(Star):
     async def _initialize(self) -> None:
         try:
             await self._repository.initialize()
+            await self._blacklist_repository.initialize()
             self._timeout_service.start()
             self._ready = True
-            logger.info("[CaptchaVerify] ready data_root=%s", self._data_root)
+            logger.info(
+                "[CaptchaVerify] ready data_root=%s blacklist_root=%s",
+                self._data_root,
+                self._blacklist_root,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -203,6 +216,30 @@ class CaptchaVerifyPlugin(Star):
             logger.error(
                 "[CaptchaVerify] raw notice handling failed notice_type=%s err=%s",
                 payload.get("notice_type"),
+                exc,
+                exc_info=True,
+            )
+        return MessageEventResult()
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    async def on_private_message(self, event: AstrMessageEvent):
+        if not self._ready:
+            return MessageEventResult()
+
+        notice = extract_private_message_notice(event)
+        if notice is None:
+            return MessageEventResult()
+
+        try:
+            result = await self._verification_workflow.handle_private_message(
+                event,
+                notice,
+            )
+            if result.handled:
+                event.stop_event()
+        except Exception as exc:
+            logger.error(
+                "[CaptchaVerify] private message verification failed err=%s",
                 exc,
                 exc_info=True,
             )

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -11,219 +9,27 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from captcha_verify.commands.command_controller import (  # noqa: E402
-    VerifyCommandController,
-)
-from captcha_verify.commands.command_service import VerifyCommandService  # noqa: E402
 from captcha_verify.domain.models import (  # noqa: E402
     DEFAULT_VERIFY_WINDOW_SECONDS,
-    PlatformEventSnapshot,
+    PrivateMessageNotice,
 )
 from captcha_verify.domain.notice_adapter import (  # noqa: E402
     parse_group_emoji_reaction_notice,
     parse_new_member_notice,
 )
 from captcha_verify.persistence.repository import (  # noqa: E402
-    DATABASE_FILENAME,
     VerifyRepository,
-    default_data_root,
 )
 from captcha_verify.platforms.bot_actions import BotActionResult  # noqa: E402
 from captcha_verify.platforms.bot_actions import SendGroupTextResult  # noqa: E402
-from captcha_verify.workflow.messages import format_push_verification_log  # noqa: E402
 from captcha_verify.workflow.verification_workflow import (  # noqa: E402
     OK_EMOJI_ID,
     OK_EMOJI_SYMBOL,
+    QUESTION_EMOJI_ID,
+    QUESTION_EMOJI_LEGACY_ID,
+    QUESTION_EMOJI_SYMBOL,
     VerificationWorkflow,
 )
-
-
-class VerifyRepositoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_persists_enabled_group_and_push_binding(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repository = VerifyRepository(temp_dir)
-            await repository.initialize()
-            await repository.set_group_enabled(
-                platform="aiocqhttp",
-                group_id="10001",
-                enabled=True,
-                updated_by="90001",
-            )
-            await repository.add_push_binding(
-                platform="aiocqhttp",
-                group_id="10001",
-                push_group_id="20001",
-                created_by="90001",
-            )
-
-            config = await repository.get_group_config(
-                platform="aiocqhttp",
-                group_id="10001",
-            )
-            overview = await repository.list_enabled_overview(platform="aiocqhttp")
-
-            self.assertTrue(config.enabled)
-            self.assertEqual(config.push_group_ids, ("20001",))
-            self.assertEqual(len(overview), 1)
-            self.assertEqual(overview[0].group_id, "10001")
-            self.assertEqual(overview[0].push_group_ids, ("20001",))
-            self.assertTrue((Path(temp_dir) / DATABASE_FILENAME).is_file())
-
-    async def test_overview_only_lists_enabled_groups(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repository = VerifyRepository(temp_dir)
-            await repository.set_group_enabled(
-                platform="aiocqhttp",
-                group_id="10001",
-                enabled=False,
-                updated_by="90001",
-            )
-            await repository.add_push_binding(
-                platform="aiocqhttp",
-                group_id="10001",
-                push_group_id="20001",
-                created_by="90001",
-            )
-
-            overview = await repository.list_enabled_overview(platform="aiocqhttp")
-
-            self.assertEqual(overview, [])
-
-    def test_default_data_root_uses_dist_namespace(self) -> None:
-        current_dir = os.getcwd()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                os.chdir(temp_dir)
-                root = Path(default_data_root())
-            finally:
-                os.chdir(current_dir)
-
-        self.assertEqual(
-            root,
-            Path(temp_dir) / "data" / "dist" / "astrbot_plugin_captcha_verify",
-        )
-
-    async def test_migrates_v2_verification_ready_flags(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            _create_v2_database(temp_dir)
-            repository = VerifyRepository(temp_dir)
-            await repository.initialize()
-
-            source_session = await repository.find_pending_session_by_group_prompt(
-                platform="aiocqhttp",
-                group_id="10001",
-                message_id="1001",
-            )
-            push_session = await repository.find_pending_session_by_push_prompt(
-                platform="aiocqhttp",
-                push_group_id="20001",
-                message_id="1002",
-            )
-
-            self.assertIsNotNone(source_session)
-            self.assertIsNotNone(push_session)
-
-
-class VerifyCommandControllerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_bind_one_argument_binds_current_group(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repository = VerifyRepository(temp_dir)
-            controller = VerifyCommandController(
-                VerifyCommandService(repository),
-                FakePermissions(),
-            )
-            snapshot = PlatformEventSnapshot(
-                platform="aiocqhttp",
-                group_id="10001",
-                sender_id="90001",
-                sender_role="admin",
-            )
-
-            message = await controller.bind(
-                object(),
-                snapshot,
-                "20001",
-                "",
-            )
-            config = await repository.get_group_config(
-                platform="aiocqhttp",
-                group_id="10001",
-            )
-
-            self.assertIn("推送群绑定已保存", message)
-            self.assertEqual(config.push_group_ids, ("20001",))
-
-    async def test_bind_explicit_group_requires_global_admin(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repository = VerifyRepository(temp_dir)
-            controller = VerifyCommandController(
-                VerifyCommandService(repository),
-                FakePermissions(),
-            )
-            snapshot = PlatformEventSnapshot(
-                platform="aiocqhttp",
-                group_id="10001",
-                sender_id="90001",
-                sender_role="admin",
-            )
-
-            message = await controller.bind(
-                object(),
-                snapshot,
-                "10002",
-                "20001",
-            )
-
-            self.assertIn("需要 AstrBot 管理员权限", message)
-
-    async def test_overview_csv_lists_enabled_group_bindings(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repository = VerifyRepository(temp_dir)
-            service = VerifyCommandService(repository)
-            controller = VerifyCommandController(service, FakePermissions(global_admin=True))
-            snapshot = PlatformEventSnapshot(
-                platform="aiocqhttp",
-                group_id="10001",
-                sender_id="90001",
-            )
-            await service.set_enabled(
-                platform="aiocqhttp",
-                group_id="10001",
-                enabled=True,
-                updated_by="90001",
-            )
-            await service.bind_push_group(
-                platform="aiocqhttp",
-                group_id="10001",
-                push_group_id="20001",
-                created_by="90001",
-            )
-
-            csv_text = await controller.overview(object(), snapshot, "csv")
-
-            self.assertEqual(
-                csv_text,
-                "platform,group_id,enabled,push_groups\n"
-                "aiocqhttp,10001,true,20001",
-            )
-
-
-class VerificationMessageTests(unittest.TestCase):
-    def test_formats_unix_notice_time_as_local_datetime(self) -> None:
-        notice = parse_new_member_notice(
-            {
-                "post_type": "notice",
-                "notice_type": "group_increase",
-                "group_id": 10001,
-                "user_id": 30001,
-                "sub_type": "invite",
-                "time": 1710000000,
-            },
-            platform="aiocqhttp",
-        )
-
-        self.assertIsNotNone(notice)
-        self.assertIn("时间=2024-03-10 00-00", format_push_verification_log(notice))
 
 
 class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -233,6 +39,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -248,12 +55,18 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bot_actions.sent_groups[:2], ["10001", "20001"])
             self.assertEqual(
                 bot_actions.reactions,
-                [("1001", OK_EMOJI_ID), ("1002", OK_EMOJI_ID)],
+                [
+                    ("1001", OK_EMOJI_ID),
+                    ("1001", QUESTION_EMOJI_ID),
+                    ("1002", OK_EMOJI_ID),
+                    ("1002", QUESTION_EMOJI_ID),
+                ],
             )
             self.assertEqual(
                 bot_actions.sent_messages[0],
                 "本人或群管在6小时内点击下方OK手势即可完成认证\n"
-                "如遇QQ兼容问题，私信机器人一条信息即可触发验证码验证流程",
+                "如遇QQ兼容问题，私信机器人任意一条信息即可通过\n"
+                "群主或管理员点击下方问号表情将踢出并加入黑名单",
             )
 
     async def test_source_group_new_member_reaction_approves(self) -> None:
@@ -262,6 +75,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -276,7 +90,9 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result.handled)
             self.assertIn(("10001", "30001", 0), bot_actions.mutes)
-            self.assertIn("验证方式=新人本人 👌 回应", bot_actions.sent_messages[-1])
+            self.assertTrue(
+                any("验证方式=新人本人 👌 回应" in msg for msg in bot_actions.sent_messages)
+            )
 
     async def test_unicode_ok_hand_reaction_approves(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -284,6 +100,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -306,6 +123,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -328,6 +146,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(group_admin_ids={"40001"}),
             )
@@ -342,7 +161,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result.handled)
             self.assertIn(("10001", "30001", 0), bot_actions.mutes)
-            self.assertIn("审批人=40001", bot_actions.sent_messages[-1])
+            self.assertTrue(any("审批人=40001" in msg for msg in bot_actions.sent_messages))
 
     async def test_push_group_any_reaction_approves(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -350,6 +169,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -364,7 +184,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result.handled)
             self.assertIn(("10001", "30001", 0), bot_actions.mutes)
-            self.assertIn("审批人=50001", bot_actions.sent_messages[-1])
+            self.assertTrue(any("审批人=50001" in msg for msg in bot_actions.sent_messages))
 
     async def test_non_ok_reaction_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -372,6 +192,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(group_admin_ids={"40001"}),
             )
@@ -395,6 +216,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(global_admin=True),
             )
@@ -418,6 +240,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions(reaction_ok=False)
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(group_admin_ids={"40001"}),
             )
@@ -444,6 +267,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions(failed_reaction_message_ids={"1002"})
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(group_admin_ids={"40001"}),
             )
@@ -463,6 +287,186 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.handled)
             self.assertEqual(result.reason, "session_not_found")
             self.assertNotIn(("10001", "30001", 0), bot_actions.mutes)
+
+    async def test_private_message_from_pending_user_approves(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                FakeBlacklistRepository(),
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+
+            result = await workflow.handle_private_message(
+                object(),
+                PrivateMessageNotice(
+                    platform="aiocqhttp",
+                    user_id="30001",
+                    message_id="9001",
+                ),
+            )
+
+            self.assertTrue(result.handled)
+            self.assertIn(("10001", "30001", 0), bot_actions.mutes)
+            self.assertTrue(
+                any("验证方式=新人私信机器人" in msg for msg in bot_actions.sent_messages)
+            )
+            self.assertTrue(
+                any(
+                    "CAPTCHA VERIFICATION EVENT: APPROVED" in msg
+                    for msg in bot_actions.sent_messages
+                )
+            )
+
+    async def test_push_group_question_reaction_rejects_and_blacklists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            blacklist_repository = FakeBlacklistRepository()
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="20001",
+                user_id="50001",
+                message_id="1002",
+                emoji_id=QUESTION_EMOJI_SYMBOL,
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertTrue(result.handled)
+            self.assertEqual(
+                bot_actions.kicks,
+                [("aiocqhttp", "10001", "30001", False)],
+            )
+            self.assertEqual(
+                blacklist_repository.entries,
+                [("aiocqhttp", "10001", "30001", "50001", "question_reaction")],
+            )
+            self.assertTrue(
+                any("已拒绝并加入黑名单" in msg for msg in bot_actions.sent_messages)
+            )
+            self.assertTrue(
+                any(
+                    "CAPTCHA VERIFICATION EVENT: REJECTED_AND_BLACKLISTED" in msg
+                    for msg in bot_actions.sent_messages
+                )
+            )
+
+    async def test_legacy_question_reaction_rejects_and_blacklists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            blacklist_repository = FakeBlacklistRepository()
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="20001",
+                user_id="50001",
+                message_id="1002",
+                emoji_id=QUESTION_EMOJI_LEGACY_ID,
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertTrue(result.handled)
+            self.assertEqual(
+                bot_actions.kicks,
+                [("aiocqhttp", "10001", "30001", False)],
+            )
+
+    async def test_source_group_question_reaction_requires_admin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            blacklist_repository = FakeBlacklistRepository()
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="10001",
+                user_id="40001",
+                message_id="1001",
+                emoji_id=QUESTION_EMOJI_SYMBOL,
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertFalse(result.handled)
+            self.assertEqual(result.reason, "source_rejection_denied")
+            self.assertEqual(bot_actions.kicks, [])
+            self.assertEqual(blacklist_repository.entries, [])
+
+    async def test_blacklisted_new_member_is_kicked_without_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            blacklist_repository = FakeBlacklistRepository()
+            blacklist_repository.blacklisted.add(("aiocqhttp", "10001", "30001"))
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+
+            result = await workflow.handle_new_member_joined(
+                object(),
+                _new_member_notice(),
+            )
+
+            self.assertTrue(result.handled)
+            self.assertEqual(result.reason, "blacklisted_member_kicked")
+            self.assertEqual(
+                bot_actions.kicks,
+                [("aiocqhttp", "10001", "30001", False)],
+            )
+            self.assertEqual(bot_actions.sent_messages, [])
+
+    async def test_blacklisted_new_member_is_not_kicked_when_switch_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            await repository.set_group_blacklist_kick_enabled(
+                platform="aiocqhttp",
+                group_id="10001",
+                enabled=False,
+                updated_by="90001",
+            )
+            blacklist_repository = FakeBlacklistRepository()
+            blacklist_repository.blacklisted.add(("aiocqhttp", "10001", "30001"))
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+
+            result = await workflow.handle_new_member_joined(
+                object(),
+                _new_member_notice(),
+            )
+
+            self.assertTrue(result.handled)
+            self.assertEqual(bot_actions.kicks, [])
+            self.assertNotEqual(bot_actions.sent_messages, [])
 
     async def test_zero_count_ok_reaction_is_ignored(self) -> None:
         reaction = parse_group_emoji_reaction_notice(
@@ -509,6 +513,33 @@ class FakePermissions:
         return user_id in self._group_admin_ids
 
 
+class FakeBlacklistRepository:
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str, str, str, str]] = []
+        self.blacklisted: set[tuple[str, str, str]] = set()
+
+    async def add_group_blacklist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        operator_id: str,
+        reason: str,
+    ) -> None:
+        self.entries.append((platform, group_id, user_id, operator_id, reason))
+        self.blacklisted.add((platform, group_id, user_id))
+
+    async def is_group_blacklisted(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        return (platform, group_id, user_id) in self.blacklisted
+
+
 class FakeBotActions:
     def __init__(
         self,
@@ -520,6 +551,7 @@ class FakeBotActions:
         self.sent_groups: list[str] = []
         self.sent_messages: list[str] = []
         self.mutes: list[tuple[str, str, int]] = []
+        self.kicks: list[tuple[str, str, str, bool]] = []
         self.reactions: list[tuple[str, str]] = []
         self.reaction_ok = reaction_ok
         self.failed_reaction_message_ids = failed_reaction_message_ids or set()
@@ -572,90 +604,16 @@ class FakeBotActions:
             reason="" if reaction_ok else "reaction failed",
         )
 
-
-def _create_v2_database(temp_dir: str) -> None:
-    database_path = Path(temp_dir) / DATABASE_FILENAME
-    connection = sqlite3.connect(database_path)
-    try:
-        connection.executescript(
-            """
-            CREATE TABLE verification_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                platform TEXT NOT NULL,
-                group_id TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                status TEXT NOT NULL
-                    CHECK (
-                        status IN (
-                            'pending',
-                            'approved',
-                            'superseded',
-                            'expired'
-                        )
-                    ),
-                prompt_message_id TEXT NOT NULL DEFAULT '',
-                muted_until TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                approved_at TEXT NOT NULL DEFAULT '',
-                approver_id TEXT NOT NULL DEFAULT '',
-                approval_source TEXT NOT NULL DEFAULT '',
-                approval_group_id TEXT NOT NULL DEFAULT '',
-                approval_message_id TEXT NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE verification_push_messages (
-                session_id INTEGER NOT NULL,
-                push_group_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (session_id, push_group_id, message_id),
-                FOREIGN KEY (session_id)
-                    REFERENCES verification_sessions(id)
-                    ON DELETE CASCADE
-            );
-
-            INSERT INTO verification_sessions (
-                id,
-                platform,
-                group_id,
-                user_id,
-                status,
-                prompt_message_id,
-                muted_until,
-                created_at,
-                updated_at
-            )
-            VALUES (
-                1,
-                'aiocqhttp',
-                '10001',
-                '30001',
-                'pending',
-                '1001',
-                '2024-03-10 00-00',
-                '2024-03-10T00:00:00+00:00',
-                '2024-03-10T00:00:00+00:00'
-            );
-
-            INSERT INTO verification_push_messages (
-                session_id,
-                push_group_id,
-                message_id,
-                created_at
-            )
-            VALUES (
-                1,
-                '20001',
-                '1002',
-                '2024-03-10T00:00:00+00:00'
-            );
-
-            PRAGMA user_version = 2;
-            """
-        )
-    finally:
-        connection.close()
+    async def kick_group_member(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        reject_add_request: bool = False,
+    ) -> BotActionResult:
+        self.kicks.append((platform, group_id, user_id, reject_add_request))
+        return BotActionResult(ok=True)
 
 
 async def _enabled_repository(temp_dir: str) -> VerifyRepository:

@@ -4,7 +4,7 @@ import csv
 import io
 
 from ..domain.duration import format_duration_text
-from ..domain.models import VerifyGroupConfig, VerifyOverviewRow
+from ..domain.models import TIMEOUT_ACTION_KICK, VerifyGroupConfig, VerifyOverviewRow
 from ..persistence.repository import VerifyRepository
 
 
@@ -76,6 +76,50 @@ class VerifyCommandService:
             ]
         )
 
+    async def set_timeout_action(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        timeout_action: str,
+        updated_by: str,
+    ) -> str:
+        config = await self._repository.set_group_timeout_action(
+            platform=platform,
+            group_id=group_id,
+            timeout_action=timeout_action,
+            updated_by=updated_by,
+        )
+        return "\n".join(
+            [
+                "超时处理方式已保存。",
+                f"群号={config.group_id}",
+                f"超时处理={_format_timeout_action(config.timeout_action)}",
+            ]
+        )
+
+    async def set_blacklist_kick_enabled(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        enabled: bool,
+        updated_by: str,
+    ) -> str:
+        config = await self._repository.set_group_blacklist_kick_enabled(
+            platform=platform,
+            group_id=group_id,
+            enabled=enabled,
+            updated_by=updated_by,
+        )
+        return "\n".join(
+            [
+                "黑名单自动踢出开关已保存。",
+                f"群号={config.group_id}",
+                f"黑名单自动踢出={_format_human_bool(config.blacklist_kick_enabled)}",
+            ]
+        )
+
     async def format_status(self, *, platform: str, group_id: str) -> str:
         config = await self._repository.get_group_config(
             platform=platform,
@@ -88,6 +132,8 @@ class VerifyCommandService:
                 f"群号={config.group_id}",
                 f"已启用={_format_human_bool(config.enabled)}",
                 f"验证窗口={format_duration_text(config.verify_window_seconds)}",
+                f"超时处理={_format_timeout_action(config.timeout_action)}",
+                f"黑名单自动踢出={_format_human_bool(config.blacklist_kick_enabled)}",
                 f"推送群={_format_push_groups(config)}",
             ]
         )
@@ -109,6 +155,10 @@ class VerifyCommandService:
                 ".verify bind <group_id> <push_group_id> - 将指定群绑定到推送群",
                 ".verify set timeout [seconds] - 设置当前群验证窗口时间",
                 ".verify set timeout <group_id> <seconds> - 设置指定群验证窗口时间",
+                ".verify set timeout-action [kick|mute] - 设置当前群超时处理",
+                ".verify set timeout-action <group_id> <kick|mute> - 设置指定群超时处理",
+                ".verify set blacklist-kick [on|off] - 设置当前群黑名单自动踢出",
+                ".verify set blacklist-kick <group_id> <on|off> - 设置指定群黑名单自动踢出",
                 ".verify overview [csv] - 查看已启用群与推送群绑定",
             ]
         )
@@ -126,6 +176,12 @@ def _format_push_groups(config: VerifyGroupConfig) -> str:
     if not config.push_group_ids:
         return "无"
     return ",".join(config.push_group_ids)
+
+
+def _format_timeout_action(timeout_action: str) -> str:
+    if timeout_action == TIMEOUT_ACTION_KICK:
+        return "踢出"
+    return "长时禁言"
 
 
 def _format_overview_summary(rows: list[VerifyOverviewRow]) -> str:

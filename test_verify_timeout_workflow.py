@@ -15,6 +15,7 @@ from captcha_verify.platforms.bot_actions import BotActionResult  # noqa: E402
 from captcha_verify.platforms.bot_actions import SendGroupTextResult  # noqa: E402
 from captcha_verify.workflow.verification_workflow import (  # noqa: E402
     OK_EMOJI_ID,
+    QUESTION_EMOJI_ID,
     VerificationWorkflow,
 )
 
@@ -38,6 +39,7 @@ class VerifyTimeoutWorkflowTests(unittest.IsolatedAsyncioTestCase):
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
+                FakeBlacklistRepository(),
                 bot_actions,
                 FakePermissions(),
             )
@@ -54,7 +56,8 @@ class VerifyTimeoutWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 bot_actions.sent_messages[0],
                 "本人或群管在2分钟内点击下方OK手势即可完成认证\n"
-                "如遇QQ兼容问题，私信机器人一条信息即可触发验证码验证流程",
+                "如遇QQ兼容问题，私信机器人任意一条信息即可通过\n"
+                "群主或管理员点击下方问号表情将踢出并加入黑名单",
             )
             self.assertEqual(
                 bot_actions.mutes,
@@ -75,6 +78,29 @@ class FakePermissions:
     ) -> bool:
         _ = event, user_id, group_id
         return False
+
+
+class FakeBlacklistRepository:
+    async def is_group_blacklisted(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        _ = platform, group_id, user_id
+        return False
+
+    async def add_group_blacklist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        operator_id: str,
+        reason: str,
+    ) -> None:
+        _ = platform, group_id, user_id, operator_id, reason
 
 
 class FakeBotActions:
@@ -112,6 +138,17 @@ class FakeBotActions:
         self.mutes.append((group_id, user_id, duration_seconds))
         return BotActionResult(ok=True)
 
+    async def kick_group_member(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        reject_add_request: bool = False,
+    ) -> BotActionResult:
+        _ = platform, group_id, user_id, reject_add_request
+        return BotActionResult(ok=True)
+
     async def add_message_reaction(
         self,
         event: Any,
@@ -121,7 +158,7 @@ class FakeBotActions:
     ) -> BotActionResult:
         _ = event
         self.reactions.append((message_id, emoji_id))
-        return BotActionResult(ok=emoji_id == OK_EMOJI_ID)
+        return BotActionResult(ok=emoji_id in {OK_EMOJI_ID, QUESTION_EMOJI_ID})
 
 
 def _new_member_notice():

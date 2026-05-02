@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..domain.models import PlatformEventSnapshot
+from ..domain.models import PlatformEventSnapshot, PrivateMessageNotice
 
 
 MESSAGE_OBJ_RAW_FIELDS = ("raw_message", "raw_event", "raw")
@@ -54,6 +54,18 @@ def extract_raw_notice_payload(event: Any) -> dict[str, Any] | None:
         if isinstance(raw, dict):
             return raw
     return None
+
+
+def extract_private_message_notice(event: Any) -> PrivateMessageNotice | None:
+    snapshot = dehydrate_event_snapshot(event)
+    if not snapshot.platform or not snapshot.sender_id:
+        return None
+    return PrivateMessageNotice(
+        platform=snapshot.platform,
+        user_id=snapshot.sender_id,
+        message_id=_event_value(event, "message_id", "get_message_id"),
+        time_raw=_event_value(event, "timestamp", "time"),
+    )
 
 
 def extract_onebot_action_client(event: Any) -> object | None:

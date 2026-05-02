@@ -12,6 +12,7 @@ from captcha_verify.persistence.repository import VerifyRepository  # noqa: E402
 from captcha_verify.platforms.bot_actions import BotActionResult  # noqa: E402
 from captcha_verify.workflow.messages import utc_now_text  # noqa: E402
 from captcha_verify.workflow.verification_timeout import (  # noqa: E402
+    TIMEOUT_LONG_MUTE_SECONDS,
     VerificationTimeoutService,
 )
 
@@ -72,10 +73,40 @@ class VerificationTimeoutServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(expired_count, 0)
             self.assertEqual(bot_actions.kicks, [])
 
+    async def test_expired_pending_session_can_be_long_muted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = VerifyRepository(temp_dir)
+            await repository.set_group_timeout_action(
+                platform="aiocqhttp",
+                group_id="10001",
+                timeout_action="mute",
+                updated_by="90001",
+            )
+            await repository.create_pending_verification_session(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+                muted_until=FUTURE_MUTED_UNTIL,
+                verify_window_seconds=1,
+                expires_at=PAST_EXPIRES_AT,
+            )
+            bot_actions = FakeBotActions()
+            service = VerificationTimeoutService(repository, bot_actions)
+
+            expired_count = await service.process_expired_once()
+
+            self.assertEqual(expired_count, 1)
+            self.assertEqual(bot_actions.kicks, [])
+            self.assertEqual(
+                bot_actions.mutes,
+                [("10001", "30001", TIMEOUT_LONG_MUTE_SECONDS)],
+            )
+
 
 class FakeBotActions:
     def __init__(self) -> None:
         self.kicks: list[tuple[str, str, str, bool]] = []
+        self.mutes: list[tuple[str, str, int]] = []
 
     async def kick_group_member(
         self,
@@ -86,6 +117,18 @@ class FakeBotActions:
         reject_add_request: bool = False,
     ) -> BotActionResult:
         self.kicks.append((platform, group_id, user_id, reject_add_request))
+        return BotActionResult(ok=True)
+
+    async def set_group_mute(
+        self,
+        event: object | None,
+        *,
+        group_id: str,
+        user_id: str,
+        duration_seconds: int,
+    ) -> BotActionResult:
+        _ = event
+        self.mutes.append((group_id, user_id, duration_seconds))
         return BotActionResult(ok=True)
 
 

@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ..domain.models import PlatformEventSnapshot
-from ..domain.validation import is_valid_group_id, parse_verify_window_seconds
+from ..domain.validation import (
+    is_valid_group_id,
+    parse_bool_switch,
+    parse_timeout_action,
+    parse_verify_window_seconds,
+)
 from .command_service import VerifyCommandService
 
 
@@ -22,7 +27,11 @@ BIND_USAGE = (
 OVERVIEW_USAGE = "用法：.verify overview [csv]"
 SET_USAGE = (
     "用法：.verify set timeout [seconds]\n"
-    "用法：.verify set timeout <group_id> <seconds>"
+    "用法：.verify set timeout <group_id> <seconds>\n"
+    "用法：.verify set timeout-action [kick|mute]\n"
+    "用法：.verify set timeout-action <group_id> <kick|mute>\n"
+    "用法：.verify set blacklist-kick [on|off]\n"
+    "用法：.verify set blacklist-kick <group_id> <on|off>"
 )
 
 
@@ -147,21 +156,50 @@ class VerifyCommandController:
         first: str = "",
         second: str = "",
     ) -> str:
-        if key.strip().casefold() != "timeout":
-            return SET_USAGE
-        resolved = _resolve_timeout_args(snapshot, first, second)
-        if resolved is None:
-            return SET_USAGE
-        group_id, verify_window_seconds = resolved
-        denial = await self._manage_denial(event, snapshot, group_id)
-        if denial:
-            return denial
-        return await self._command_service.set_verify_window_seconds(
-            platform=snapshot.platform,
-            group_id=group_id,
-            verify_window_seconds=verify_window_seconds,
-            updated_by=snapshot.sender_id,
-        )
+        normalized_key = _normalize_set_key(key)
+        if normalized_key == "timeout":
+            resolved_timeout = _resolve_timeout_args(snapshot, first, second)
+            if resolved_timeout is None:
+                return SET_USAGE
+            group_id, verify_window_seconds = resolved_timeout
+            denial = await self._manage_denial(event, snapshot, group_id)
+            if denial:
+                return denial
+            return await self._command_service.set_verify_window_seconds(
+                platform=snapshot.platform,
+                group_id=group_id,
+                verify_window_seconds=verify_window_seconds,
+                updated_by=snapshot.sender_id,
+            )
+        if normalized_key == "timeout_action":
+            resolved_action = _resolve_timeout_action_args(snapshot, first, second)
+            if resolved_action is None:
+                return SET_USAGE
+            group_id, timeout_action = resolved_action
+            denial = await self._manage_denial(event, snapshot, group_id)
+            if denial:
+                return denial
+            return await self._command_service.set_timeout_action(
+                platform=snapshot.platform,
+                group_id=group_id,
+                timeout_action=timeout_action,
+                updated_by=snapshot.sender_id,
+            )
+        if normalized_key == "blacklist_kick":
+            resolved_switch = _resolve_bool_switch_args(snapshot, first, second)
+            if resolved_switch is None:
+                return SET_USAGE
+            group_id, enabled = resolved_switch
+            denial = await self._manage_denial(event, snapshot, group_id)
+            if denial:
+                return denial
+            return await self._command_service.set_blacklist_kick_enabled(
+                platform=snapshot.platform,
+                group_id=group_id,
+                enabled=enabled,
+                updated_by=snapshot.sender_id,
+            )
+        return SET_USAGE
 
     async def help(
         self,
@@ -249,3 +287,47 @@ def _resolve_timeout_args(
             return None
         return first, verify_window_seconds
     return None
+
+
+def _resolve_timeout_action_args(
+    snapshot: PlatformEventSnapshot,
+    first: str,
+    second: str,
+) -> tuple[str, str] | None:
+    first = first.strip()
+    second = second.strip()
+    if first and not second:
+        timeout_action = parse_timeout_action(first)
+        if timeout_action is None or not snapshot.group_id:
+            return None
+        return snapshot.group_id, timeout_action
+    if first and second and is_valid_group_id(first):
+        timeout_action = parse_timeout_action(second)
+        if timeout_action is None:
+            return None
+        return first, timeout_action
+    return None
+
+
+def _resolve_bool_switch_args(
+    snapshot: PlatformEventSnapshot,
+    first: str,
+    second: str,
+) -> tuple[str, bool] | None:
+    first = first.strip()
+    second = second.strip()
+    if first and not second:
+        enabled = parse_bool_switch(first)
+        if enabled is None or not snapshot.group_id:
+            return None
+        return snapshot.group_id, enabled
+    if first and second and is_valid_group_id(first):
+        enabled = parse_bool_switch(second)
+        if enabled is None:
+            return None
+        return first, enabled
+    return None
+
+
+def _normalize_set_key(key: str) -> str:
+    return key.strip().casefold().replace("-", "_")

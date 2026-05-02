@@ -9,7 +9,7 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
-from ..domain.models import VerificationSession
+from ..domain.models import TIMEOUT_ACTION_MUTE, VerificationSession
 from ..persistence.repository import VerifyRepository
 from ..platforms.bot_actions import BotActionResult
 from .messages import utc_now_text
@@ -17,6 +17,7 @@ from .messages import utc_now_text
 
 TIMEOUT_POLL_INTERVAL_SECONDS = 30.0
 TIMEOUT_EXPIRE_BATCH_LIMIT = 50
+TIMEOUT_LONG_MUTE_SECONDS = 30 * 24 * 60 * 60
 
 
 class BotActions(Protocol):
@@ -27,6 +28,16 @@ class BotActions(Protocol):
         group_id: str,
         user_id: str,
         reject_add_request: bool = False,
+    ) -> BotActionResult:
+        ...
+
+    async def set_group_mute(
+        self,
+        event: object | None,
+        *,
+        group_id: str,
+        user_id: str,
+        duration_seconds: int,
     ) -> BotActionResult:
         ...
 
@@ -74,7 +85,14 @@ class VerificationTimeoutService:
             limit=self._batch_limit,
         )
         for session in sessions:
-            await self._kick_expired_member(session)
+            config = await self._repository.get_group_config(
+                platform=session.platform,
+                group_id=session.group_id,
+            )
+            if config.timeout_action == TIMEOUT_ACTION_MUTE:
+                await self._mute_expired_member(session)
+            else:
+                await self._kick_expired_member(session)
         return len(sessions)
 
     async def _run(self) -> None:
@@ -102,6 +120,21 @@ class VerificationTimeoutService:
         if not result.ok:
             logger.error(
                 "[CaptchaVerify] kick expired member failed group=%s user=%s reason=%s",
+                session.group_id,
+                session.user_id,
+                result.reason,
+            )
+
+    async def _mute_expired_member(self, session: VerificationSession) -> None:
+        result = await self._bot_actions.set_group_mute(
+            None,
+            group_id=session.group_id,
+            user_id=session.user_id,
+            duration_seconds=TIMEOUT_LONG_MUTE_SECONDS,
+        )
+        if not result.ok:
+            logger.error(
+                "[CaptchaVerify] mute expired member failed group=%s user=%s reason=%s",
                 session.group_id,
                 session.user_id,
                 result.reason,
