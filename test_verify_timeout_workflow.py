@@ -15,7 +15,6 @@ from captcha_verify.platforms.bot_actions import BotActionResult  # noqa: E402
 from captcha_verify.platforms.bot_actions import SendGroupTextResult  # noqa: E402
 from captcha_verify.workflow.verification_workflow import (  # noqa: E402
     OK_EMOJI_ID,
-    VERIFICATION_MUTE_SECONDS,
     VerificationWorkflow,
 )
 
@@ -30,10 +29,10 @@ class VerifyTimeoutWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 enabled=True,
                 updated_by="90001",
             )
-            await repository.set_group_timeout_seconds(
+            await repository.set_group_verify_window_seconds(
                 platform="aiocqhttp",
                 group_id="10001",
-                timeout_seconds=120,
+                verify_window_seconds=120,
                 updated_by="90001",
             )
             bot_actions = FakeBotActions()
@@ -51,7 +50,7 @@ class VerifyTimeoutWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
 
             self.assertIsNotNone(session)
-            self.assertEqual(session.timeout_seconds if session else 0, 120)
+            self.assertEqual(session.verify_window_seconds if session else 0, 120)
             self.assertEqual(
                 bot_actions.sent_messages[0],
                 "本人或群管在2分钟内点击下方OK手势即可完成认证\n"
@@ -59,7 +58,7 @@ class VerifyTimeoutWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 bot_actions.mutes,
-                [("10001", "30001", VERIFICATION_MUTE_SECONDS)],
+                [("10001", "30001", 120)],
             )
 
 

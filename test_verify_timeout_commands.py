@@ -44,9 +44,9 @@ class VerifyTimeoutCommandTests(unittest.IsolatedAsyncioTestCase):
                 group_id="10001",
             )
 
-            self.assertIn("认证超时时间已保存", message)
-            self.assertIn("认证超时=2小时", message)
-            self.assertEqual(config.timeout_seconds, 7200)
+            self.assertIn("验证窗口时间已保存", message)
+            self.assertIn("验证窗口=2小时", message)
+            self.assertEqual(config.verify_window_seconds, 7200)
 
     async def test_set_timeout_for_other_group_requires_global_admin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,7 +87,7 @@ class VerifyTimeoutCommandTests(unittest.IsolatedAsyncioTestCase):
 
             message = await controller.status(object(), snapshot, "10001")
 
-            self.assertIn("认证超时=6小时", message)
+            self.assertIn("验证窗口=6小时", message)
 
 
 class FakePermissions:

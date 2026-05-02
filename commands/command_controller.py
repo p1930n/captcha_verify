@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ..domain.models import PlatformEventSnapshot
-from ..domain.validation import is_valid_group_id, parse_timeout_seconds
+from ..domain.validation import is_valid_group_id, parse_verify_window_seconds
 from .command_service import VerifyCommandService
 
 
@@ -152,14 +152,14 @@ class VerifyCommandController:
         resolved = _resolve_timeout_args(snapshot, first, second)
         if resolved is None:
             return SET_USAGE
-        group_id, timeout_seconds = resolved
+        group_id, verify_window_seconds = resolved
         denial = await self._manage_denial(event, snapshot, group_id)
         if denial:
             return denial
-        return await self._command_service.set_timeout_seconds(
+        return await self._command_service.set_verify_window_seconds(
             platform=snapshot.platform,
             group_id=group_id,
-            timeout_seconds=timeout_seconds,
+            verify_window_seconds=verify_window_seconds,
             updated_by=snapshot.sender_id,
         )
 
@@ -239,13 +239,13 @@ def _resolve_timeout_args(
     first = first.strip()
     second = second.strip()
     if first and not second:
-        timeout_seconds = parse_timeout_seconds(first)
-        if timeout_seconds is None or not snapshot.group_id:
+        verify_window_seconds = parse_verify_window_seconds(first)
+        if verify_window_seconds is None or not snapshot.group_id:
             return None
-        return snapshot.group_id, timeout_seconds
+        return snapshot.group_id, verify_window_seconds
     if first and second and is_valid_group_id(first):
-        timeout_seconds = parse_timeout_seconds(second)
-        if timeout_seconds is None:
+        verify_window_seconds = parse_verify_window_seconds(second)
+        if verify_window_seconds is None:
             return None
-        return first, timeout_seconds
+        return first, verify_window_seconds
     return None

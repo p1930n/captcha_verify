@@ -29,7 +29,7 @@ class VerificationTimeoutServiceTests(unittest.IsolatedAsyncioTestCase):
                 group_id="10001",
                 user_id="30001",
                 muted_until=FUTURE_MUTED_UNTIL,
-                timeout_seconds=1,
+                verify_window_seconds=1,
                 expires_at=PAST_EXPIRES_AT,
             )
             bot_actions = FakeBotActions()
@@ -53,7 +53,7 @@ class VerificationTimeoutServiceTests(unittest.IsolatedAsyncioTestCase):
                 group_id="10001",
                 user_id="30001",
                 muted_until=FUTURE_MUTED_UNTIL,
-                timeout_seconds=1,
+                verify_window_seconds=1,
                 expires_at=PAST_EXPIRES_AT,
             )
             await repository.approve_verification_session(

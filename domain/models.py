@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-DEFAULT_VERIFY_TIMEOUT_SECONDS = 6 * 60 * 60
-MIN_VERIFY_TIMEOUT_SECONDS = 1
-MAX_VERIFY_TIMEOUT_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_VERIFY_WINDOW_SECONDS = 6 * 60 * 60
+MIN_VERIFY_WINDOW_SECONDS = 1
+MAX_VERIFY_WINDOW_SECONDS = 30 * 24 * 60 * 60
 VERIFICATION_STATUS_PENDING = "pending"
 VERIFICATION_STATUS_APPROVED = "approved"
 VERIFICATION_STATUS_SUPERSEDED = "superseded"
@@ -32,7 +32,7 @@ class VerifyGroupConfig:
     platform: str
     group_id: str
     enabled: bool
-    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
+    verify_window_seconds: int = DEFAULT_VERIFY_WINDOW_SECONDS
     push_group_ids: tuple[str, ...] = ()
 
 
@@ -41,7 +41,7 @@ class VerifyOverviewRow:
     platform: str
     group_id: str
     enabled: bool
-    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
+    verify_window_seconds: int = DEFAULT_VERIFY_WINDOW_SECONDS
     push_group_ids: tuple[str, ...] = ()
 
 
@@ -73,7 +73,7 @@ class VerificationSession:
     group_id: str
     user_id: str
     status: str
-    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
+    verify_window_seconds: int = DEFAULT_VERIFY_WINDOW_SECONDS
     prompt_approval_ready: bool = False
     prompt_message_id: str = ""
     expires_at: str = ""

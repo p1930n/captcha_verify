@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..domain.models import (
-    DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    DEFAULT_VERIFY_WINDOW_SECONDS,
     VERIFICATION_STATUS_PENDING,
     VerifyGroupConfig,
     VerifyOverviewRow,
@@ -71,19 +71,19 @@ class VerifyRepository(VerificationRepositoryMixin):
             created_by=created_by,
         )
 
-    async def set_group_timeout_seconds(
+    async def set_group_verify_window_seconds(
         self,
         *,
         platform: str,
         group_id: str,
-        timeout_seconds: int,
+        verify_window_seconds: int,
         updated_by: str,
     ) -> VerifyGroupConfig:
         return await asyncio.to_thread(
-            self._set_group_timeout_seconds_sync,
+            self._set_group_verify_window_seconds_sync,
             platform=platform,
             group_id=group_id,
-            timeout_seconds=timeout_seconds,
+            verify_window_seconds=verify_window_seconds,
             updated_by=updated_by,
         )
 
@@ -158,7 +158,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                         platform,
                         group_id,
                         int(enabled),
-                        DEFAULT_VERIFY_TIMEOUT_SECONDS,
+                        DEFAULT_VERIFY_WINDOW_SECONDS,
                         updated_by,
                         now,
                         now,
@@ -200,7 +200,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                     (
                         platform,
                         group_id,
-                        DEFAULT_VERIFY_TIMEOUT_SECONDS,
+                        DEFAULT_VERIFY_WINDOW_SECONDS,
                         created_by,
                         now,
                         now,
@@ -239,12 +239,12 @@ class VerifyRepository(VerificationRepositoryMixin):
                 group_id=group_id,
             )
 
-    def _set_group_timeout_seconds_sync(
+    def _set_group_verify_window_seconds_sync(
         self,
         *,
         platform: str,
         group_id: str,
-        timeout_seconds: int,
+        verify_window_seconds: int,
         updated_by: str,
     ) -> VerifyGroupConfig:
         now = utc_now()
@@ -271,7 +271,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                     (
                         platform,
                         group_id,
-                        timeout_seconds,
+                        verify_window_seconds,
                         updated_by,
                         now,
                         now,
@@ -316,7 +316,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                     platform=str(row[0]),
                     group_id=str(row[1]),
                     enabled=bool(row[2]),
-                    timeout_seconds=int(row[3] or DEFAULT_VERIFY_TIMEOUT_SECONDS),
+                    verify_window_seconds=int(row[3] or DEFAULT_VERIFY_WINDOW_SECONDS),
                     push_group_ids=self._list_enabled_push_group_ids_with_connection(
                         connection,
                         platform=str(row[0]),
@@ -356,15 +356,15 @@ class VerifyRepository(VerificationRepositoryMixin):
         ).fetchone()
         enabled = bool(row[0]) if row else False
         timeout_seconds = (
-            int(row[1] or DEFAULT_VERIFY_TIMEOUT_SECONDS)
+            int(row[1] or DEFAULT_VERIFY_WINDOW_SECONDS)
             if row
-            else DEFAULT_VERIFY_TIMEOUT_SECONDS
+            else DEFAULT_VERIFY_WINDOW_SECONDS
         )
         return VerifyGroupConfig(
             platform=platform,
             group_id=group_id,
             enabled=enabled,
-            timeout_seconds=timeout_seconds,
+            verify_window_seconds=timeout_seconds,
             push_group_ids=self._list_enabled_push_group_ids_with_connection(
                 connection,
                 platform=platform,
@@ -454,7 +454,7 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
             platform TEXT NOT NULL,
             group_id TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 0,
-            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS},
+            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_WINDOW_SECONDS},
             updated_by TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -485,7 +485,7 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
             user_id TEXT NOT NULL,
             status TEXT NOT NULL
                 CHECK (status IN ('pending', 'approved', 'superseded', 'expired')),
-            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS},
+            timeout_seconds INTEGER NOT NULL DEFAULT {DEFAULT_VERIFY_WINDOW_SECONDS},
             prompt_approval_ready INTEGER NOT NULL DEFAULT 0,
             prompt_message_id TEXT NOT NULL DEFAULT '',
             expires_at TEXT NOT NULL DEFAULT '',
@@ -562,7 +562,7 @@ def _migrate_schema(connection: sqlite3.Connection, current_version: int) -> Non
             column_name="timeout_seconds",
             column_definition=(
                 "timeout_seconds INTEGER NOT NULL "
-                f"DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS}"
+                f"DEFAULT {DEFAULT_VERIFY_WINDOW_SECONDS}"
             ),
         )
         _add_column_if_missing(
@@ -571,7 +571,7 @@ def _migrate_schema(connection: sqlite3.Connection, current_version: int) -> Non
             column_name="timeout_seconds",
             column_definition=(
                 "timeout_seconds INTEGER NOT NULL "
-                f"DEFAULT {DEFAULT_VERIFY_TIMEOUT_SECONDS}"
+                f"DEFAULT {DEFAULT_VERIFY_WINDOW_SECONDS}"
             ),
         )
         _add_column_if_missing(
@@ -580,7 +580,7 @@ def _migrate_schema(connection: sqlite3.Connection, current_version: int) -> Non
             column_name="expires_at",
             column_definition="expires_at TEXT NOT NULL DEFAULT ''",
         )
-        expires_at = _utc_after_seconds(DEFAULT_VERIFY_TIMEOUT_SECONDS)
+        expires_at = _utc_after_seconds(DEFAULT_VERIFY_WINDOW_SECONDS)
         connection.execute(
             """
             UPDATE verification_sessions

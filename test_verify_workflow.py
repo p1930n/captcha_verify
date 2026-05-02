@@ -15,7 +15,10 @@ from captcha_verify.commands.command_controller import (  # noqa: E402
     VerifyCommandController,
 )
 from captcha_verify.commands.command_service import VerifyCommandService  # noqa: E402
-from captcha_verify.domain.models import PlatformEventSnapshot  # noqa: E402
+from captcha_verify.domain.models import (  # noqa: E402
+    DEFAULT_VERIFY_WINDOW_SECONDS,
+    PlatformEventSnapshot,
+)
 from captcha_verify.domain.notice_adapter import (  # noqa: E402
     parse_group_emoji_reaction_notice,
     parse_new_member_notice,
@@ -31,7 +34,6 @@ from captcha_verify.workflow.messages import format_push_verification_log  # noq
 from captcha_verify.workflow.verification_workflow import (  # noqa: E402
     OK_EMOJI_ID,
     OK_EMOJI_SYMBOL,
-    VERIFICATION_MUTE_SECONDS,
     VerificationWorkflow,
 )
 
@@ -241,7 +243,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.handled)
             self.assertEqual(
                 bot_actions.mutes,
-                [("10001", "30001", VERIFICATION_MUTE_SECONDS)],
+                [("10001", "30001", DEFAULT_VERIFY_WINDOW_SECONDS)],
             )
             self.assertEqual(bot_actions.sent_groups[:2], ["10001", "20001"])
             self.assertEqual(

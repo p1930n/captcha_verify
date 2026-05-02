@@ -29,7 +29,6 @@ from .messages import (
 
 OK_EMOJI_ID = "128076"
 OK_EMOJI_SYMBOL = "👌"
-VERIFICATION_MUTE_SECONDS = 30 * 24 * 60 * 60
 
 
 class BotActions(Protocol):
@@ -89,14 +88,12 @@ class VerificationWorkflow:
         permissions: PermissionProvider,
         *,
         ok_emoji_id: str = OK_EMOJI_ID,
-        mute_seconds: int = VERIFICATION_MUTE_SECONDS,
     ) -> None:
         self._repository = repository
         self._bot_actions = bot_actions
         self._permissions = permissions
         self._ok_emoji_id = ok_emoji_id
         self._ok_emoji_ids = _accepted_ok_emoji_ids(ok_emoji_id)
-        self._mute_seconds = mute_seconds
 
     async def handle_new_member_joined(
         self,
@@ -110,13 +107,14 @@ class VerificationWorkflow:
         if not config.enabled:
             return WorkflowResult(handled=False, reason="group_disabled")
 
+        window_seconds = config.verify_window_seconds
         session = await self._repository.create_pending_verification_session(
             platform=notice.platform,
             group_id=notice.group_id,
             user_id=notice.user_id,
-            muted_until=utc_after_seconds_text(self._mute_seconds),
-            timeout_seconds=config.timeout_seconds,
-            expires_at=utc_after_seconds_text(config.timeout_seconds),
+            muted_until=utc_after_seconds_text(window_seconds),
+            verify_window_seconds=window_seconds,
+            expires_at=utc_after_seconds_text(window_seconds),
         )
 
         await self._mute_new_member(event, notice, session)
@@ -184,7 +182,7 @@ class VerificationWorkflow:
             event,
             group_id=session.group_id,
             user_id=session.user_id,
-            duration_seconds=self._mute_seconds,
+            duration_seconds=session.verify_window_seconds,
         )
         if not result.ok:
             logger.error(
@@ -204,7 +202,7 @@ class VerificationWorkflow:
             event,
             target_group_id=notice.group_id,
             message=format_source_verification_prompt(
-                verification_window_seconds=session.timeout_seconds,
+                verification_window_seconds=session.verify_window_seconds,
             ),
         )
         if result.ok and result.message_id:

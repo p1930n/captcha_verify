@@ -54,25 +54,25 @@ class VerifyCommandService:
             ]
         )
 
-    async def set_timeout_seconds(
+    async def set_verify_window_seconds(
         self,
         *,
         platform: str,
         group_id: str,
-        timeout_seconds: int,
+        verify_window_seconds: int,
         updated_by: str,
     ) -> str:
-        config = await self._repository.set_group_timeout_seconds(
+        config = await self._repository.set_group_verify_window_seconds(
             platform=platform,
             group_id=group_id,
-            timeout_seconds=timeout_seconds,
+            verify_window_seconds=verify_window_seconds,
             updated_by=updated_by,
         )
         return "\n".join(
             [
-                "认证超时时间已保存。",
+                "验证窗口时间已保存。",
                 f"群号={config.group_id}",
-                f"认证超时={format_duration_text(config.timeout_seconds)}",
+                f"验证窗口={format_duration_text(config.verify_window_seconds)}",
             ]
         )
 
@@ -87,7 +87,7 @@ class VerifyCommandService:
                 f"平台={config.platform}",
                 f"群号={config.group_id}",
                 f"已启用={_format_human_bool(config.enabled)}",
-                f"认证超时={format_duration_text(config.timeout_seconds)}",
+                f"验证窗口={format_duration_text(config.verify_window_seconds)}",
                 f"推送群={_format_push_groups(config)}",
             ]
         )
@@ -107,8 +107,8 @@ class VerifyCommandService:
                 ".verify status [group_id] - 查看当前群或指定群状态",
                 ".verify bind <push_group_id> - 将当前群绑定到推送群",
                 ".verify bind <group_id> <push_group_id> - 将指定群绑定到推送群",
-                ".verify set timeout [seconds] - 设置当前群认证超时时间",
-                ".verify set timeout <group_id> <seconds> - 设置指定群认证超时时间",
+                ".verify set timeout [seconds] - 设置当前群验证窗口时间",
+                ".verify set timeout <group_id> <seconds> - 设置指定群验证窗口时间",
                 ".verify overview [csv] - 查看已启用群与推送群绑定",
             ]
         )

@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from ..domain.models import (
-    DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    DEFAULT_VERIFY_WINDOW_SECONDS,
     VERIFICATION_STATUS_APPROVED,
     VERIFICATION_STATUS_EXPIRED,
     VERIFICATION_STATUS_PENDING,
@@ -23,7 +23,7 @@ class VerificationRepositoryMixin:
         group_id: str,
         user_id: str,
         muted_until: str,
-        timeout_seconds: int,
+        verify_window_seconds: int,
         expires_at: str,
     ) -> VerificationSession:
         return await asyncio.to_thread(
@@ -32,7 +32,7 @@ class VerificationRepositoryMixin:
             group_id=group_id,
             user_id=user_id,
             muted_until=muted_until,
-            timeout_seconds=timeout_seconds,
+            verify_window_seconds=verify_window_seconds,
             expires_at=expires_at,
         )
 
@@ -165,7 +165,7 @@ class VerificationRepositoryMixin:
         group_id: str,
         user_id: str,
         muted_until: str,
-        timeout_seconds: int,
+        verify_window_seconds: int,
         expires_at: str,
     ) -> VerificationSession:
         now = _utc_now()
@@ -211,7 +211,7 @@ class VerificationRepositoryMixin:
                         group_id,
                         user_id,
                         VERIFICATION_STATUS_PENDING,
-                        timeout_seconds,
+                        verify_window_seconds,
                         expires_at,
                         muted_until,
                         now,
@@ -617,7 +617,7 @@ def _verification_session_from_row(row: object) -> VerificationSession | None:
         group_id=str(values[2]),
         user_id=str(values[3]),
         status=str(values[4]),
-        timeout_seconds=int(values[5] or DEFAULT_VERIFY_TIMEOUT_SECONDS),
+        verify_window_seconds=int(values[5] or DEFAULT_VERIFY_WINDOW_SECONDS),
         prompt_approval_ready=bool(values[6]),
         prompt_message_id=str(values[7] or ""),
         expires_at=str(values[8] or ""),
