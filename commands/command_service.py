@@ -148,6 +148,7 @@ class VerifyCommandService:
         return "\n".join(
             [
                 "验证码入群审核命令：",
+                ".verify help - 查看本帮助",
                 ".verify enable [group_id] - 启用当前群或指定群",
                 ".verify disable [group_id] - 停用当前群或指定群",
                 ".verify status [group_id] - 查看当前群或指定群状态",
@@ -160,6 +161,14 @@ class VerifyCommandService:
                 ".verify set blacklist-kick [on|off] - 设置当前群黑名单自动踢出",
                 ".verify set blacklist-kick <group_id> <on|off> - 设置指定群黑名单自动踢出",
                 ".verify overview [csv] - 查看已启用群与推送群绑定",
+                "参数说明：",
+                "[group_id] 省略时使用当前群；指定其他群需要 AstrBot 管理员权限。",
+                "timeout 秒数范围以插件配置常量为准，默认 6 小时。",
+                "timeout-action: kick=超时踢出，mute=超时长时禁言。",
+                "blacklist-kick 只控制黑名单成员再次入群时是否自动踢出，不会删除黑名单记录。",
+                "开关别名：on/off、enable/disable、开启/关闭、启用/停用、开/关。",
+                "审核动作：审核消息下点击 OK 表情放行，点击问号表情拒绝、踢出并加入该群黑名单。",
+                "权限：群内管理命令需要 AstrBot 管理员或当前群群主/管理员；overview 需要 AstrBot 管理员。",
             ]
         )
 
