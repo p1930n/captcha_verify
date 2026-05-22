@@ -9,6 +9,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 
 from ..domain.models import (
+    DEFAULT_REVOKE_PROMPT_ENABLED,
     DEFAULT_VERIFY_WINDOW_SECONDS,
     VerifyGroupConfig,
     VerifyOverviewRow,
@@ -120,6 +121,22 @@ class VerifyRepository(VerificationRepositoryMixin):
     ) -> VerifyGroupConfig:
         return await asyncio.to_thread(
             self._set_group_blacklist_kick_enabled_sync,
+            platform=platform,
+            group_id=group_id,
+            enabled=enabled,
+            updated_by=updated_by,
+        )
+
+    async def set_group_revoke_prompt_enabled(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        enabled: bool,
+        updated_by: str,
+    ) -> VerifyGroupConfig:
+        return await asyncio.to_thread(
+            self._set_group_revoke_prompt_enabled_sync,
             platform=platform,
             group_id=group_id,
             enabled=enabled,
@@ -414,6 +431,52 @@ class VerifyRepository(VerificationRepositoryMixin):
                 group_id=group_id,
             )
 
+    def _set_group_revoke_prompt_enabled_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        enabled: bool,
+        updated_by: str,
+    ) -> VerifyGroupConfig:
+        now = utc_now()
+        with self._connection() as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO verify_group_settings (
+                        platform,
+                        group_id,
+                        enabled,
+                        timeout_seconds,
+                        revoke_prompt_enabled,
+                        updated_by,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, 0, ?, ?, ?, ?, ?)
+                    ON CONFLICT (platform, group_id)
+                    DO UPDATE SET
+                        revoke_prompt_enabled = excluded.revoke_prompt_enabled,
+                        updated_by = excluded.updated_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        platform,
+                        group_id,
+                        DEFAULT_VERIFY_WINDOW_SECONDS,
+                        int(enabled),
+                        updated_by,
+                        now,
+                        now,
+                    ),
+                )
+            return self._get_group_config_with_connection(
+                connection,
+                platform=platform,
+                group_id=group_id,
+            )
+
     def _get_group_config_sync(
         self,
         *,
@@ -436,7 +499,7 @@ class VerifyRepository(VerificationRepositoryMixin):
             rows = connection.execute(
                 """
                 SELECT platform, group_id, enabled, timeout_seconds, timeout_action,
-                    blacklist_kick_enabled
+                    blacklist_kick_enabled, revoke_prompt_enabled
                 FROM verify_group_settings
                 WHERE platform = ? AND enabled = 1
                 ORDER BY group_id
@@ -451,6 +514,7 @@ class VerifyRepository(VerificationRepositoryMixin):
                     verify_window_seconds=int(row[3] or DEFAULT_VERIFY_WINDOW_SECONDS),
                     timeout_action=normalize_timeout_action(row[4]),
                     blacklist_kick_enabled=bool(row[5]),
+                    revoke_prompt_enabled=bool(row[6]),
                     push_group_ids=self._list_enabled_push_group_ids_with_connection(
                         connection,
                         platform=str(row[0]),
@@ -482,7 +546,8 @@ class VerifyRepository(VerificationRepositoryMixin):
     ) -> VerifyGroupConfig:
         row = connection.execute(
             """
-            SELECT enabled, timeout_seconds, timeout_action, blacklist_kick_enabled
+            SELECT enabled, timeout_seconds, timeout_action, blacklist_kick_enabled,
+                revoke_prompt_enabled
             FROM verify_group_settings
             WHERE platform = ? AND group_id = ?
             """,
@@ -496,6 +561,9 @@ class VerifyRepository(VerificationRepositoryMixin):
         )
         timeout_action = normalize_timeout_action(row[2] if row else None)
         blacklist_kick_enabled = bool(row[3]) if row else True
+        revoke_prompt_enabled = (
+            bool(row[4]) if row else DEFAULT_REVOKE_PROMPT_ENABLED
+        )
         return VerifyGroupConfig(
             platform=platform,
             group_id=group_id,
@@ -503,6 +571,7 @@ class VerifyRepository(VerificationRepositoryMixin):
             verify_window_seconds=timeout_seconds,
             timeout_action=timeout_action,
             blacklist_kick_enabled=blacklist_kick_enabled,
+            revoke_prompt_enabled=revoke_prompt_enabled,
             push_group_ids=self._list_enabled_push_group_ids_with_connection(
                 connection,
                 platform=platform,

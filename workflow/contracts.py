@@ -45,6 +45,14 @@ class BotActions(Protocol):
     ) -> BotActionResult:
         ...
 
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        ...
+
 
 class PermissionProvider(Protocol):
     def is_global_admin_id(self, user_id: str) -> bool:

@@ -102,11 +102,41 @@ class VerificationTimeoutServiceTests(unittest.IsolatedAsyncioTestCase):
                 [("10001", "30001", TIMEOUT_LONG_MUTE_SECONDS)],
             )
 
+    async def test_expired_pending_session_deletes_prompt_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = VerifyRepository(temp_dir)
+            await repository.set_group_revoke_prompt_enabled(
+                platform="aiocqhttp",
+                group_id="10001",
+                enabled=True,
+                updated_by="90001",
+            )
+            session = await repository.create_pending_verification_session(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+                muted_until=FUTURE_MUTED_UNTIL,
+                verify_window_seconds=1,
+                expires_at=PAST_EXPIRES_AT,
+            )
+            await repository.set_verification_prompt_message(
+                session_id=session.id,
+                prompt_message_id="1001",
+            )
+            bot_actions = FakeBotActions()
+            service = VerificationTimeoutService(repository, bot_actions)
+
+            expired_count = await service.process_expired_once()
+
+            self.assertEqual(expired_count, 1)
+            self.assertEqual(bot_actions.deleted_messages, [("aiocqhttp", "1001")])
+
 
 class FakeBotActions:
     def __init__(self) -> None:
         self.kicks: list[tuple[str, str, str, bool]] = []
         self.mutes: list[tuple[str, str, int]] = []
+        self.deleted_messages: list[tuple[str, str]] = []
 
     async def kick_group_member(
         self,
@@ -129,6 +159,15 @@ class FakeBotActions:
     ) -> BotActionResult:
         _ = event
         self.mutes.append((group_id, user_id, duration_seconds))
+        return BotActionResult(ok=True)
+
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        self.deleted_messages.append((platform, message_id))
         return BotActionResult(ok=True)
 
 

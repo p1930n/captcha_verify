@@ -12,7 +12,7 @@ from pathlib import Path
 
 BLACKLIST_DIRECTORY_NAME = "group_blacklist"
 BLACKLIST_DATABASE_FILENAME = "group_blacklist.db"
-BLACKLIST_SCHEMA_VERSION = 1
+BLACKLIST_SCHEMA_VERSION = 2
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
@@ -53,6 +53,66 @@ class BlacklistRepository:
     ) -> bool:
         return await asyncio.to_thread(
             self._is_group_blacklisted_sync,
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
+    async def remove_group_blacklist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._remove_group_blacklist_entry_sync,
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
+    async def add_group_whitelist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        operator_id: str,
+        reason: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._add_group_whitelist_entry_sync,
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+            operator_id=operator_id,
+            reason=reason,
+        )
+
+    async def remove_group_whitelist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._remove_group_whitelist_entry_sync,
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
+    async def is_group_whitelisted(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._is_group_whitelisted_sync,
             platform=platform,
             group_id=group_id,
             user_id=user_id,
@@ -116,6 +176,100 @@ class BlacklistRepository:
             ).fetchone()
             return row is not None
 
+    def _remove_group_blacklist_entry_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        with self._connection() as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    DELETE FROM group_blacklist
+                    WHERE platform = ?
+                        AND group_id = ?
+                        AND user_id = ?
+                    """,
+                    (platform, group_id, user_id),
+                )
+            return cursor.rowcount > 0
+
+    def _add_group_whitelist_entry_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        operator_id: str,
+        reason: str,
+    ) -> None:
+        now = _utc_now()
+        with self._connection() as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO group_whitelist (
+                        platform,
+                        group_id,
+                        user_id,
+                        operator_id,
+                        reason,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (platform, group_id, user_id)
+                    DO UPDATE SET
+                        operator_id = excluded.operator_id,
+                        reason = excluded.reason,
+                        updated_at = excluded.updated_at
+                    """,
+                    (platform, group_id, user_id, operator_id, reason, now, now),
+                )
+
+    def _remove_group_whitelist_entry_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        with self._connection() as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    DELETE FROM group_whitelist
+                    WHERE platform = ?
+                        AND group_id = ?
+                        AND user_id = ?
+                    """,
+                    (platform, group_id, user_id),
+                )
+            return cursor.rowcount > 0
+
+    def _is_group_whitelisted_sync(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM group_whitelist
+                WHERE platform = ?
+                    AND group_id = ?
+                    AND user_id = ?
+                LIMIT 1
+                """,
+                (platform, group_id, user_id),
+            ).fetchone()
+            return row is not None
+
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         self._root.mkdir(parents=True, exist_ok=True)
@@ -164,6 +318,26 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_group_blacklist_user
             ON group_blacklist (platform, user_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_whitelist (
+                platform TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                operator_id TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (platform, group_id, user_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_group_whitelist_user
+            ON group_whitelist (platform, user_id)
             """
         )
         connection.execute(f"PRAGMA user_version = {BLACKLIST_SCHEMA_VERSION}")

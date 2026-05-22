@@ -5,6 +5,7 @@ from typing import Any, Protocol
 from ..domain.models import PlatformEventSnapshot
 from ..domain.validation import (
     is_valid_group_id,
+    is_valid_user_id,
     parse_bool_switch,
     parse_timeout_action,
     parse_verify_window_seconds,
@@ -25,13 +26,25 @@ BIND_USAGE = (
     "用法：.verify bind <group_id> <push_group_id>"
 )
 OVERVIEW_USAGE = "用法：.verify overview [csv]"
+BLACKLIST_USAGE = (
+    "用法：.verify blacklist remove <user_id>\n"
+    "用法：.verify blacklist remove <group_id> <user_id>"
+)
+WHITELIST_USAGE = (
+    "用法：.verify whitelist add <user_id>\n"
+    "用法：.verify whitelist add <group_id> <user_id>\n"
+    "用法：.verify whitelist remove <user_id>\n"
+    "用法：.verify whitelist remove <group_id> <user_id>"
+)
 SET_USAGE = (
     "用法：.verify set timeout [seconds]\n"
     "用法：.verify set timeout <group_id> <seconds>\n"
     "用法：.verify set timeout-action [kick|mute]\n"
     "用法：.verify set timeout-action <group_id> <kick|mute>\n"
     "用法：.verify set blacklist-kick [on|off]\n"
-    "用法：.verify set blacklist-kick <group_id> <on|off>"
+    "用法：.verify set blacklist-kick <group_id> <on|off>\n"
+    "用法：.verify set revoke-prompt [on|off]\n"
+    "用法：.verify set revoke-prompt <group_id> <on|off>"
 )
 
 
@@ -148,6 +161,60 @@ class VerifyCommandController:
             output_format=output_format,
         )
 
+    async def blacklist(
+        self,
+        event: Any,
+        snapshot: PlatformEventSnapshot,
+        action: str = "",
+        first: str = "",
+        second: str = "",
+    ) -> str:
+        if _normalize_list_action(action) != "remove":
+            return BLACKLIST_USAGE
+        resolved = _resolve_group_user_args(snapshot, first, second)
+        if resolved is None:
+            return BLACKLIST_USAGE
+        group_id, user_id = resolved
+        denial = await self._manage_denial(event, snapshot, group_id)
+        if denial:
+            return denial
+        return await self._command_service.remove_blacklist_entry(
+            platform=snapshot.platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
+    async def whitelist(
+        self,
+        event: Any,
+        snapshot: PlatformEventSnapshot,
+        action: str = "",
+        first: str = "",
+        second: str = "",
+    ) -> str:
+        normalized_action = _normalize_list_action(action)
+        if normalized_action not in {"add", "remove"}:
+            return WHITELIST_USAGE
+        resolved = _resolve_group_user_args(snapshot, first, second)
+        if resolved is None:
+            return WHITELIST_USAGE
+        group_id, user_id = resolved
+        denial = await self._manage_denial(event, snapshot, group_id)
+        if denial:
+            return denial
+        if normalized_action == "add":
+            return await self._command_service.add_whitelist_entry(
+                platform=snapshot.platform,
+                group_id=group_id,
+                user_id=user_id,
+                operator_id=snapshot.sender_id,
+            )
+        return await self._command_service.remove_whitelist_entry(
+            platform=snapshot.platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+
     async def set(
         self,
         event: Any,
@@ -194,6 +261,20 @@ class VerifyCommandController:
             if denial:
                 return denial
             return await self._command_service.set_blacklist_kick_enabled(
+                platform=snapshot.platform,
+                group_id=group_id,
+                enabled=enabled,
+                updated_by=snapshot.sender_id,
+            )
+        if normalized_key == "revoke_prompt":
+            resolved_switch = _resolve_bool_switch_args(snapshot, first, second)
+            if resolved_switch is None:
+                return SET_USAGE
+            group_id, enabled = resolved_switch
+            denial = await self._manage_denial(event, snapshot, group_id)
+            if denial:
+                return denial
+            return await self._command_service.set_revoke_prompt_enabled(
                 platform=snapshot.platform,
                 group_id=group_id,
                 enabled=enabled,
@@ -269,6 +350,22 @@ def _resolve_bind_args(
     return None
 
 
+def _resolve_group_user_args(
+    snapshot: PlatformEventSnapshot,
+    first: str,
+    second: str,
+) -> tuple[str, str] | None:
+    first = first.strip()
+    second = second.strip()
+    if first and not second:
+        if not snapshot.group_id or not is_valid_user_id(first):
+            return None
+        return snapshot.group_id, first
+    if first and second and is_valid_group_id(first) and is_valid_user_id(second):
+        return first, second
+    return None
+
+
 def _resolve_timeout_args(
     snapshot: PlatformEventSnapshot,
     first: str,
@@ -331,3 +428,12 @@ def _resolve_bool_switch_args(
 
 def _normalize_set_key(key: str) -> str:
     return key.strip().casefold().replace("-", "_")
+
+
+def _normalize_list_action(action: str) -> str:
+    normalized = action.strip().casefold().replace("-", "_")
+    if normalized in {"add", "append", "create", "加入", "添加"}:
+        return "add"
+    if normalized in {"remove", "rm", "del", "delete", "移除", "删除"}:
+        return "remove"
+    return normalized

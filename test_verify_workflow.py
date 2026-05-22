@@ -93,6 +93,35 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 any("验证方式=新人本人 👌 回应" in msg for msg in bot_actions.sent_messages)
             )
+            self.assertEqual(bot_actions.deleted_messages, [])
+
+    async def test_revoke_prompt_enabled_deletes_source_prompt_on_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            await repository.set_group_revoke_prompt_enabled(
+                platform="aiocqhttp",
+                group_id="10001",
+                enabled=True,
+                updated_by="90001",
+            )
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                FakeBlacklistRepository(),
+                bot_actions,
+                FakePermissions(),
+            )
+            await workflow.handle_new_member_joined(object(), _new_member_notice())
+            reaction = _emoji_reaction(
+                group_id="10001",
+                user_id="30001",
+                message_id="1001",
+            )
+
+            result = await workflow.handle_emoji_reaction(object(), reaction)
+
+            self.assertTrue(result.handled)
+            self.assertEqual(bot_actions.deleted_messages, [("aiocqhttp", "1001")])
 
     async def test_unicode_ok_hand_reaction_approves(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -291,6 +320,12 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_private_message_from_pending_user_approves(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = await _enabled_repository(temp_dir)
+            await repository.set_group_revoke_prompt_enabled(
+                platform="aiocqhttp",
+                group_id="10001",
+                enabled=True,
+                updated_by="90001",
+            )
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
                 repository,
@@ -320,10 +355,17 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     for msg in bot_actions.sent_messages
                 )
             )
+            self.assertEqual(bot_actions.deleted_messages, [("aiocqhttp", "1001")])
 
     async def test_push_group_question_reaction_rejects_and_blacklists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = await _enabled_repository(temp_dir)
+            await repository.set_group_revoke_prompt_enabled(
+                platform="aiocqhttp",
+                group_id="10001",
+                enabled=True,
+                updated_by="90001",
+            )
             blacklist_repository = FakeBlacklistRepository()
             bot_actions = FakeBotActions()
             workflow = VerificationWorkflow(
@@ -351,6 +393,7 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 blacklist_repository.entries,
                 [("aiocqhttp", "10001", "30001", "50001", "question_reaction")],
             )
+            self.assertEqual(bot_actions.deleted_messages, [("aiocqhttp", "1001")])
             self.assertTrue(
                 any("已拒绝并加入黑名单" in msg for msg in bot_actions.sent_messages)
             )
@@ -440,6 +483,31 @@ class VerificationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(bot_actions.sent_messages, [])
 
+    async def test_whitelisted_new_member_skips_prompt_and_blacklist_kick(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = await _enabled_repository(temp_dir)
+            blacklist_repository = FakeBlacklistRepository()
+            blacklist_repository.blacklisted.add(("aiocqhttp", "10001", "30001"))
+            blacklist_repository.whitelisted.add(("aiocqhttp", "10001", "30001"))
+            bot_actions = FakeBotActions()
+            workflow = VerificationWorkflow(
+                repository,
+                blacklist_repository,
+                bot_actions,
+                FakePermissions(),
+            )
+
+            result = await workflow.handle_new_member_joined(
+                object(),
+                _new_member_notice(),
+            )
+
+            self.assertTrue(result.handled)
+            self.assertEqual(result.reason, "whitelisted_member_skipped")
+            self.assertEqual(bot_actions.kicks, [])
+            self.assertEqual(bot_actions.mutes, [])
+            self.assertEqual(bot_actions.sent_messages, [])
+
     async def test_blacklisted_new_member_is_not_kicked_when_switch_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = await _enabled_repository(temp_dir)
@@ -517,6 +585,7 @@ class FakeBlacklistRepository:
     def __init__(self) -> None:
         self.entries: list[tuple[str, str, str, str, str]] = []
         self.blacklisted: set[tuple[str, str, str]] = set()
+        self.whitelisted: set[tuple[str, str, str]] = set()
 
     async def add_group_blacklist_entry(
         self,
@@ -539,6 +608,15 @@ class FakeBlacklistRepository:
     ) -> bool:
         return (platform, group_id, user_id) in self.blacklisted
 
+    async def is_group_whitelisted(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        return (platform, group_id, user_id) in self.whitelisted
+
 
 class FakeBotActions:
     def __init__(
@@ -553,6 +631,7 @@ class FakeBotActions:
         self.mutes: list[tuple[str, str, int]] = []
         self.kicks: list[tuple[str, str, str, bool]] = []
         self.reactions: list[tuple[str, str]] = []
+        self.deleted_messages: list[tuple[str, str]] = []
         self.reaction_ok = reaction_ok
         self.failed_reaction_message_ids = failed_reaction_message_ids or set()
         self._next_message_id = 1000
@@ -613,6 +692,15 @@ class FakeBotActions:
         reject_add_request: bool = False,
     ) -> BotActionResult:
         self.kicks.append((platform, group_id, user_id, reject_add_request))
+        return BotActionResult(ok=True)
+
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        self.deleted_messages.append((platform, message_id))
         return BotActionResult(ok=True)
 
 

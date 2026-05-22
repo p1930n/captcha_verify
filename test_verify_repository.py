@@ -15,6 +15,10 @@ from captcha_verify.persistence.repository import (  # noqa: E402
     VerifyRepository,
     default_data_root,
 )
+from captcha_verify.persistence.blacklist_repository import (  # noqa: E402
+    BLACKLIST_DATABASE_FILENAME,
+    BlacklistRepository,
+)
 
 
 class VerifyRepositoryTests(unittest.IsolatedAsyncioTestCase):
@@ -101,6 +105,79 @@ class VerifyRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsNotNone(source_session)
             self.assertIsNotNone(push_session)
+
+    async def test_revoke_prompt_defaults_to_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = VerifyRepository(temp_dir)
+
+            config = await repository.get_group_config(
+                platform="aiocqhttp",
+                group_id="10001",
+            )
+
+            self.assertFalse(config.revoke_prompt_enabled)
+
+    async def test_blacklist_repository_removes_blacklist_and_tracks_whitelist(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = BlacklistRepository(temp_dir)
+            await repository.initialize()
+            await repository.add_group_blacklist_entry(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+                operator_id="90001",
+                reason="test",
+            )
+            await repository.add_group_whitelist_entry(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+                operator_id="90001",
+                reason="test",
+            )
+
+            blacklisted_before = await repository.is_group_blacklisted(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+            )
+            whitelisted_before = await repository.is_group_whitelisted(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+            )
+            blacklist_removed = await repository.remove_group_blacklist_entry(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+            )
+            whitelist_removed = await repository.remove_group_whitelist_entry(
+                platform="aiocqhttp",
+                group_id="10001",
+                user_id="30001",
+            )
+
+            self.assertTrue(blacklisted_before)
+            self.assertTrue(whitelisted_before)
+            self.assertTrue(blacklist_removed)
+            self.assertTrue(whitelist_removed)
+            self.assertFalse(
+                await repository.is_group_blacklisted(
+                    platform="aiocqhttp",
+                    group_id="10001",
+                    user_id="30001",
+                )
+            )
+            self.assertFalse(
+                await repository.is_group_whitelisted(
+                    platform="aiocqhttp",
+                    group_id="10001",
+                    user_id="30001",
+                )
+            )
+            self.assertTrue((Path(temp_dir) / BLACKLIST_DATABASE_FILENAME).is_file())
 
 
 def _create_v2_database(temp_dir: str) -> None:

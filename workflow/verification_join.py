@@ -43,6 +43,12 @@ class VerificationJoinHandler:
         )
         if not config.enabled:
             return WorkflowResult(handled=False, reason="group_disabled")
+        if await self._blacklist_repository.is_group_whitelisted(
+            platform=notice.platform,
+            group_id=notice.group_id,
+            user_id=notice.user_id,
+        ):
+            return WorkflowResult(handled=True, reason="whitelisted_member_skipped")
         if config.blacklist_kick_enabled and await self._blacklist_repository.is_group_blacklisted(
             platform=notice.platform,
             group_id=notice.group_id,

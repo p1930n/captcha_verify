@@ -55,7 +55,10 @@ class CaptchaVerifyPlugin(Star):
         self._blacklist_repository = BlacklistRepository(self._blacklist_root)
         self._permissions = PermissionService(context)
         self._bot_actions = BotActionService(self._permissions)
-        self._command_service = VerifyCommandService(self._repository)
+        self._command_service = VerifyCommandService(
+            self._repository,
+            self._blacklist_repository,
+        )
         self._command_controller = VerifyCommandController(
             self._command_service,
             self._permissions,
@@ -154,6 +157,42 @@ class CaptchaVerifyPlugin(Star):
                 event,
                 self._command_controller.overview,
                 output_format,
+            )
+        )
+
+    @verify.command("blacklist")
+    async def verify_blacklist(
+        self,
+        event: AstrMessageEvent,
+        action: str = "",
+        group_id_or_user_id: str = "",
+        user_id: str = "",
+    ):
+        yield event.plain_result(
+            await self._handle_command(
+                event,
+                self._command_controller.blacklist,
+                action,
+                group_id_or_user_id,
+                user_id,
+            )
+        )
+
+    @verify.command("whitelist")
+    async def verify_whitelist(
+        self,
+        event: AstrMessageEvent,
+        action: str = "",
+        group_id_or_user_id: str = "",
+        user_id: str = "",
+    ):
+        yield event.plain_result(
+            await self._handle_command(
+                event,
+                self._command_controller.whitelist,
+                action,
+                group_id_or_user_id,
+                user_id,
             )
         )
 

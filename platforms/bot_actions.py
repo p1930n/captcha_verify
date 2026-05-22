@@ -182,6 +182,23 @@ class BotActionService:
             emoji_id=normalized_emoji_id,
         )
 
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        normalized_message_id = message_id.strip()
+        if not _is_positive_int_text(normalized_message_id):
+            return BotActionResult(ok=False, reason=FAILED_REASON_INVALID_MESSAGE_ID)
+
+        return await self._call_action(
+            None,
+            "delete_msg",
+            platform=platform,
+            message_id=int(normalized_message_id),
+        )
+
     async def _call_action(
         self,
         event: Any | None,

@@ -17,6 +17,7 @@ TIMEOUT_ACTION_KICK = "kick"
 TIMEOUT_ACTION_MUTE = "mute"
 DEFAULT_TIMEOUT_ACTION = TIMEOUT_ACTION_KICK
 DEFAULT_BLACKLIST_KICK_ENABLED = True
+DEFAULT_REVOKE_PROMPT_ENABLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class VerifyGroupConfig:
     verify_window_seconds: int = DEFAULT_VERIFY_WINDOW_SECONDS
     timeout_action: str = DEFAULT_TIMEOUT_ACTION
     blacklist_kick_enabled: bool = DEFAULT_BLACKLIST_KICK_ENABLED
+    revoke_prompt_enabled: bool = DEFAULT_REVOKE_PROMPT_ENABLED
     push_group_ids: tuple[str, ...] = ()
 
 
@@ -51,6 +53,7 @@ class VerifyOverviewRow:
     verify_window_seconds: int = DEFAULT_VERIFY_WINDOW_SECONDS
     timeout_action: str = DEFAULT_TIMEOUT_ACTION
     blacklist_kick_enabled: bool = DEFAULT_BLACKLIST_KICK_ENABLED
+    revoke_prompt_enabled: bool = DEFAULT_REVOKE_PROMPT_ENABLED
     push_group_ids: tuple[str, ...] = ()
 
 

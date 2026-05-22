@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..domain.models import (
     DEFAULT_BLACKLIST_KICK_ENABLED,
+    DEFAULT_REVOKE_PROMPT_ENABLED,
     DEFAULT_TIMEOUT_ACTION,
     DEFAULT_VERIFY_WINDOW_SECONDS,
     TIMEOUT_ACTION_KICK,
@@ -14,7 +15,7 @@ from ..domain.models import (
     VERIFICATION_STATUS_PENDING,
 )
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
@@ -72,6 +73,7 @@ def _create_schema_objects(connection: sqlite3.Connection) -> None:
             timeout_action TEXT NOT NULL DEFAULT '{DEFAULT_TIMEOUT_ACTION}'
                 CHECK (timeout_action IN ('{TIMEOUT_ACTION_KICK}', '{TIMEOUT_ACTION_MUTE}')),
             blacklist_kick_enabled INTEGER NOT NULL DEFAULT {int(DEFAULT_BLACKLIST_KICK_ENABLED)},
+            revoke_prompt_enabled INTEGER NOT NULL DEFAULT {int(DEFAULT_REVOKE_PROMPT_ENABLED)},
             updated_by TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -255,6 +257,16 @@ def _migrate_schema(connection: sqlite3.Connection, current_version: int) -> Non
                 f"DEFAULT {int(DEFAULT_BLACKLIST_KICK_ENABLED)}"
             ),
         )
+    if current_version < 7:
+        _add_column_if_missing(
+            connection,
+            table_name="verify_group_settings",
+            column_name="revoke_prompt_enabled",
+            column_definition=(
+                "revoke_prompt_enabled INTEGER NOT NULL "
+                f"DEFAULT {int(DEFAULT_REVOKE_PROMPT_ENABLED)}"
+            ),
+        )
 
 
 def _add_column_if_missing(
@@ -281,6 +293,7 @@ def _validate_required_schema(connection: sqlite3.Connection) -> None:
             "timeout_seconds",
             "timeout_action",
             "blacklist_kick_enabled",
+            "revoke_prompt_enabled",
             "updated_by",
             "created_at",
             "updated_at",

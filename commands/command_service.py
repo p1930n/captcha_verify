@@ -5,6 +5,7 @@ import io
 
 from ..domain.duration import format_duration_text
 from ..domain.models import TIMEOUT_ACTION_KICK, VerifyGroupConfig, VerifyOverviewRow
+from ..persistence.blacklist_repository import BlacklistRepository
 from ..persistence.repository import VerifyRepository
 
 
@@ -12,8 +13,13 @@ OVERVIEW_CSV_FORMATS = frozenset(("csv", "table"))
 
 
 class VerifyCommandService:
-    def __init__(self, repository: VerifyRepository) -> None:
+    def __init__(
+        self,
+        repository: VerifyRepository,
+        blacklist_repository: BlacklistRepository,
+    ) -> None:
         self._repository = repository
+        self._blacklist_repository = blacklist_repository
 
     async def set_enabled(
         self,
@@ -120,6 +126,93 @@ class VerifyCommandService:
             ]
         )
 
+    async def set_revoke_prompt_enabled(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        enabled: bool,
+        updated_by: str,
+    ) -> str:
+        config = await self._repository.set_group_revoke_prompt_enabled(
+            platform=platform,
+            group_id=group_id,
+            enabled=enabled,
+            updated_by=updated_by,
+        )
+        return "\n".join(
+            [
+                "验证提示自动撤回开关已保存。",
+                f"群号={config.group_id}",
+                f"自动撤回验证提示={_format_human_bool(config.revoke_prompt_enabled)}",
+            ]
+        )
+
+    async def remove_blacklist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> str:
+        removed = await self._blacklist_repository.remove_group_blacklist_entry(
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        state = "已移除" if removed else "未找到"
+        return "\n".join(
+            [
+                f"群黑名单记录{state}。",
+                f"群号={group_id}",
+                f"用户={user_id}",
+            ]
+        )
+
+    async def add_whitelist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+        operator_id: str,
+    ) -> str:
+        await self._blacklist_repository.add_group_whitelist_entry(
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+            operator_id=operator_id,
+            reason="manual_command",
+        )
+        return "\n".join(
+            [
+                "群白名单记录已保存。",
+                f"群号={group_id}",
+                f"用户={user_id}",
+            ]
+        )
+
+    async def remove_whitelist_entry(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> str:
+        removed = await self._blacklist_repository.remove_group_whitelist_entry(
+            platform=platform,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        state = "已移除" if removed else "未找到"
+        return "\n".join(
+            [
+                f"群白名单记录{state}。",
+                f"群号={group_id}",
+                f"用户={user_id}",
+            ]
+        )
+
     async def format_status(self, *, platform: str, group_id: str) -> str:
         config = await self._repository.get_group_config(
             platform=platform,
@@ -134,6 +227,7 @@ class VerifyCommandService:
                 f"验证窗口={format_duration_text(config.verify_window_seconds)}",
                 f"超时处理={_format_timeout_action(config.timeout_action)}",
                 f"黑名单自动踢出={_format_human_bool(config.blacklist_kick_enabled)}",
+                f"自动撤回验证提示={_format_human_bool(config.revoke_prompt_enabled)}",
                 f"推送群={_format_push_groups(config)}",
             ]
         )
@@ -160,12 +254,22 @@ class VerifyCommandService:
                 ".verify set timeout-action <group_id> <kick|mute> - 设置指定群超时处理",
                 ".verify set blacklist-kick [on|off] - 设置当前群黑名单自动踢出",
                 ".verify set blacklist-kick <group_id> <on|off> - 设置指定群黑名单自动踢出",
+                ".verify set revoke-prompt [on|off] - 设置当前群验证提示自动撤回",
+                ".verify set revoke-prompt <group_id> <on|off> - 设置指定群验证提示自动撤回",
+                ".verify blacklist remove <user_id> - 从当前群黑名单移除用户",
+                ".verify blacklist remove <group_id> <user_id> - 从指定群黑名单移除用户",
+                ".verify whitelist add <user_id> - 将用户加入当前群白名单",
+                ".verify whitelist add <group_id> <user_id> - 将用户加入指定群白名单",
+                ".verify whitelist remove <user_id> - 从当前群白名单移除用户",
+                ".verify whitelist remove <group_id> <user_id> - 从指定群白名单移除用户",
                 ".verify overview [csv] - 查看已启用群与推送群绑定",
                 "参数说明：",
                 "[group_id] 省略时使用当前群；指定其他群需要 AstrBot 管理员权限。",
                 "timeout 秒数范围以插件配置常量为准，默认 6 小时。",
                 "timeout-action: kick=超时踢出，mute=超时长时禁言。",
                 "blacklist-kick 只控制黑名单成员再次入群时是否自动踢出，不会删除黑名单记录。",
+                "revoke-prompt 开启后会在通过、拒绝或超时后撤回源群验证提示，默认关闭。",
+                "白名单成员入群会直接跳过验证码与黑名单自动踢出检查。",
                 "开关别名：on/off、enable/disable、开启/关闭、启用/停用、开/关。",
                 "审核动作：审核消息下点击 OK 表情放行，点击问号表情拒绝、踢出并加入该群黑名单。",
                 "权限：群内管理命令需要 AstrBot 管理员或当前群群主/管理员；overview 需要 AstrBot 管理员。",

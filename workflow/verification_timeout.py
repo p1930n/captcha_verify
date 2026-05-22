@@ -41,6 +41,14 @@ class BotActions(Protocol):
     ) -> BotActionResult:
         ...
 
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        ...
+
 
 class VerificationTimeoutService:
     def __init__(
@@ -93,6 +101,8 @@ class VerificationTimeoutService:
                 await self._mute_expired_member(session)
             else:
                 await self._kick_expired_member(session)
+            if config.revoke_prompt_enabled:
+                await self._delete_source_prompt(session)
         return len(sessions)
 
     async def _run(self) -> None:
@@ -137,5 +147,20 @@ class VerificationTimeoutService:
                 "[CaptchaVerify] mute expired member failed group=%s user=%s reason=%s",
                 session.group_id,
                 session.user_id,
+                result.reason,
+            )
+
+    async def _delete_source_prompt(self, session: VerificationSession) -> None:
+        if not session.prompt_message_id:
+            return
+        result = await self._bot_actions.delete_message(
+            platform=session.platform,
+            message_id=session.prompt_message_id,
+        )
+        if not result.ok:
+            logger.error(
+                "[CaptchaVerify] delete expired source prompt failed group=%s message=%s reason=%s",
+                session.group_id,
+                session.prompt_message_id,
                 result.reason,
             )

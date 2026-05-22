@@ -72,8 +72,33 @@ class VerificationPrivateMessageHandler:
                 unmute_result.reason,
             )
 
+        await self._delete_source_prompt_if_enabled(approved)
         await self._send_approval_logs(event, approved, notice)
         return WorkflowResult(handled=True)
+
+    async def _delete_source_prompt_if_enabled(
+        self,
+        session: VerificationSession,
+    ) -> None:
+        if not session.prompt_message_id:
+            return
+        config = await self._repository.get_group_config(
+            platform=session.platform,
+            group_id=session.group_id,
+        )
+        if not config.revoke_prompt_enabled:
+            return
+        result = await self._bot_actions.delete_message(
+            platform=session.platform,
+            message_id=session.prompt_message_id,
+        )
+        if not result.ok:
+            logger.error(
+                "[CaptchaVerify] delete source prompt failed group=%s message=%s reason=%s",
+                session.group_id,
+                session.prompt_message_id,
+                result.reason,
+            )
 
     async def _send_approval_logs(
         self,

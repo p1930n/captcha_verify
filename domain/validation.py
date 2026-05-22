@@ -10,6 +10,8 @@ from .models import (
 
 MIN_QQ_GROUP_ID_LENGTH = 5
 MAX_QQ_GROUP_ID_LENGTH = 20
+MIN_QQ_USER_ID_LENGTH = 5
+MAX_QQ_USER_ID_LENGTH = 20
 TIMEOUT_ACTION_ALIASES = {
     "kick": TIMEOUT_ACTION_KICK,
     "踢": TIMEOUT_ACTION_KICK,
@@ -48,6 +50,14 @@ def is_valid_group_id(value: str) -> bool:
     return (
         normalized.isdigit()
         and MIN_QQ_GROUP_ID_LENGTH <= len(normalized) <= MAX_QQ_GROUP_ID_LENGTH
+    )
+
+
+def is_valid_user_id(value: str) -> bool:
+    normalized = value.strip()
+    return (
+        normalized.isdigit()
+        and MIN_QQ_USER_ID_LENGTH <= len(normalized) <= MAX_QQ_USER_ID_LENGTH
     )
 
 

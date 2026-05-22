@@ -81,6 +81,16 @@ class FakePermissions:
 
 
 class FakeBlacklistRepository:
+    async def is_group_whitelisted(
+        self,
+        *,
+        platform: str,
+        group_id: str,
+        user_id: str,
+    ) -> bool:
+        _ = platform, group_id, user_id
+        return False
+
     async def is_group_blacklisted(
         self,
         *,
@@ -108,6 +118,7 @@ class FakeBotActions:
         self.sent_messages: list[str] = []
         self.mutes: list[tuple[str, str, int]] = []
         self.reactions: list[tuple[str, str]] = []
+        self.deleted_messages: list[tuple[str, str]] = []
         self._next_message_id = 1000
 
     async def send_group_text(
@@ -159,6 +170,15 @@ class FakeBotActions:
         _ = event
         self.reactions.append((message_id, emoji_id))
         return BotActionResult(ok=emoji_id in {OK_EMOJI_ID, QUESTION_EMOJI_ID})
+
+    async def delete_message(
+        self,
+        *,
+        platform: str,
+        message_id: str,
+    ) -> BotActionResult:
+        self.deleted_messages.append((platform, message_id))
+        return BotActionResult(ok=True)
 
 
 def _new_member_notice():
